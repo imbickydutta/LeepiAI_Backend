@@ -153,7 +153,7 @@ class AudioService {
 
       fileStats = await fs.stat(audioFilePath);
       const fileSizeMB = (fileStats.size / (1024 * 1024)).toFixed(2);
-      this.logger.info(`🔄 Starting transcription for ${fileSizeMB}MB file`);
+      this.logger.info(`🔄 Starting transcription for ${fileSizeMB}MB file using model: ${this.config.openai.audioModel}`);
 
       // Ensure suitable format/size: transcode if necessary (ffmpeg), then maybe segment
       const prepared = await this._prepareAudioForTranscription(audioFilePath);
@@ -255,8 +255,12 @@ class AudioService {
         outputAudioPath ? this.transcribeAudio(outputAudioPath, opts) : Promise.resolve(null)
       ]);
 
-      if (!inputRes.success) throw new Error(`Input transcription failed: ${inputRes.error}`);
+      if (!inputRes.success) {
+        this.logger.error('❌ Input transcription failed:', { error: inputRes.error, code: inputRes.code, status: inputRes.status });
+        throw new Error(`Input transcription failed: ${inputRes.error}`);
+      }
       if (outputAudioPath && (!outputRes || !outputRes.success)) {
+        this.logger.error('❌ Output transcription failed:', { error: outputRes?.error, code: outputRes?.code, status: outputRes?.status });
         throw new Error(`Output transcription failed: ${outputRes?.error}`);
       }
 
@@ -444,6 +448,14 @@ class AudioService {
 
       return { success: true, ...processed };
     } catch (err) {
+      this.logger.error('❌ Transcription request failed:', {
+        error: err.message,
+        status: err.status,
+        type: err.constructor.name,
+        file: audioFilePath,
+        model: options.model || this.config.openai.audioModel
+      });
+      
       const friendly = this._mapOpenAIError(err);
       return { success: false, error: friendly.hint || err.message, code: friendly.code, status: friendly.status };
     }
@@ -616,7 +628,16 @@ class AudioService {
     else if (status === 429) { code = 'RATE_LIMIT'; hint = 'Rate limited. Back off and retry using Retry-After header.'; }
     else if (status >= 500) { code = 'SERVER_ERROR'; hint = 'Temporary server issue. Retry with backoff.'; }
 
-    this.logger.error('OpenAI error:', { status, type, code, hint });
+    this.logger.error('OpenAI error:', { 
+      status, 
+      type, 
+      code, 
+      hint,
+      message: err?.message,
+      stack: err?.stack,
+      response: err?.response?.data,
+      request: err?.request?.method
+    });
     return { status, type, code, hint };
   }
 
