@@ -4,7 +4,7 @@
   "description": "Backend server for LeepiAI Interview Recorder",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app-simple.js",
+    "start": "node src/app-debug.js",
     "start-full": "node src/app.js",
     "dev": "nodemon src/app.js",
     "test": "jest"
