@@ -1,206 +1,133 @@
+// =====================================================
+// IMPORTS & SETUP
+// =====================================================
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const compression = require('compression');
-const rateLimit = require('express-rate-limit');
-const cookieParser = require('cookie-parser');
-
-// Load environment configuration
+const morgan = require('morgan');
+const logger = require('./utils/logger');
 const config = require('./config/env');
 const database = require('./config/database');
-const logger = require('./utils/logger');
+const routes = require('./routes');
 
-// Import middleware
-const { errorHandler, notFound } = require('./middleware/errorHandler');
-const { handleUploadError } = require('./middleware/upload');
-
-// Import routes
-const authRoutes = require('./routes/auth');
-const audioRoutes = require('./routes/audio');
-const transcriptRoutes = require('./routes/transcripts');
-const aiRoutes = require('./routes/ai');
-const userRoutes = require('./routes/users');
-const analyticsRoutes = require('./routes/analytics');
-const settingsRoutes = require('./routes/settings');
-
-// Create Express app
+// Initialize express app
 const app = express();
 
 // =====================================================
-// SECURITY MIDDLEWARE
+// ERROR HANDLERS
 // =====================================================
 
-// Helmet for security headers
-app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "http://localhost:*", "https://*"],
-    },
-  },
-}));
+// Handle uncaught exceptions
+process.on('uncaughtException', (error) => {
+  logger.error('💥 UNCAUGHT EXCEPTION:', {
+    error: error.message,
+    stack: error.stack
+  });
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('💥 UNHANDLED REJECTION:', {
+    reason: reason instanceof Error ? reason.message : reason,
+    stack: reason instanceof Error ? reason.stack : 'No stack trace',
+    promise: promise
+  });
+  process.exit(1);
+});
+
+// =====================================================
+// MIDDLEWARE
+// =====================================================
 
 // CORS configuration
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, Electron)
-    if (!origin) {
-      logger.info('🌐 Allowing request with no origin');
-      return callback(null, true);
-    }
-
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Split the allowed origins string into an array
     const allowedOrigins = config.cors.origin.split(',').map(o => o.trim());
     
-    // Check if origin matches any allowed patterns
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (allowedOrigin.includes('*')) {
-        // Convert glob pattern to regex
-        const pattern = allowedOrigin
-          .replace(/\./g, '\\.')
-          .replace(/\*/g, '.*');
-        const regex = new RegExp(`^${pattern}$`);
-        const matches = regex.test(origin);
-        logger.debug(`🔍 Testing origin ${origin} against pattern ${pattern}: ${matches}`);
-        return matches;
-      }
-      return allowedOrigin === origin;
+    // Log the CORS check
+    logger.debug('🔒 CORS Check:', {
+      requestOrigin: origin,
+      allowedOrigins: allowedOrigins,
+      isAllowed: !origin || allowedOrigins.some(allowed => {
+        // Handle wildcards
+        if (allowed.includes('*')) {
+          const pattern = new RegExp('^' + allowed.replace('*', '.*') + '$');
+          return pattern.test(origin);
+        }
+        return allowed === origin;
+      })
     });
 
-    if (isAllowed) {
-      logger.info(`✅ Allowing origin: ${origin}`);
+    // No origin (like mobile apps) or matches allowed origins
+    if (!origin || allowedOrigins.some(allowed => {
+      if (allowed.includes('*')) {
+        const pattern = new RegExp('^' + allowed.replace('*', '.*') + '$');
+        return pattern.test(origin);
+      }
+      return allowed === origin;
+    })) {
       callback(null, true);
     } else {
-      logger.warn(`🚫 Blocked request from unauthorized origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
+      callback(new Error('CORS not allowed'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'Accept',
-    'Origin'
-  ],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Disposition']
-}));
+};
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: config.rateLimit.windowMs,
-  max: config.rateLimit.maxRequests,
-  message: {
-    success: false,
-    error: 'Too many requests from this IP, please try again later.'
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use(limiter);
+// Apply middleware
+app.use(cors(corsOptions));
+app.use(helmet());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 
 // =====================================================
-// GENERAL MIDDLEWARE
+// ROUTES
 // =====================================================
 
-// Compression
-app.use(compression());
-
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Cookie parser
-app.use(cookieParser());
-
-// Request logging
-app.use(logger.logRequest);
-
-// =====================================================
-// HEALTH CHECK ENDPOINTS
-// =====================================================
-
-app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'LeepiAI Backend API is running',
-    version: '1.0.0',
-    timestamp: new Date().toISOString()
-  });
+// Health check endpoint
+app.get('/health', (req, res) => {
+  const health = {
+    uptime: process.uptime(),
+    timestamp: Date.now(),
+    database: database.getConnectionStatus(),
+    memory: process.memoryUsage()
+  };
+  
+  // Log health check
+  logger.info('📊 Health Check:', health);
+  
+  res.json(health);
 });
 
-// Health check endpoint with detailed status
-app.get('/health', async (req, res) => {
-  try {
-    const dbStatus = database.getConnectionStatus();
-    const health = {
-      status: dbStatus.state === 'connected' ? 'healthy' : 'unhealthy',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      environment: config.env,
-      database: {
-        status: dbStatus.state,
-        isConnected: dbStatus.isConnected,
-        host: dbStatus.host,
-        name: dbStatus.name
-      },
-      memory: {
-        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
-        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB',
-        external: Math.round(process.memoryUsage().external / 1024 / 1024) + 'MB'
-      }
-    };
-
-    if (health.status === 'unhealthy') {
-      return res.status(503).json({
-        success: false,
-        error: 'Service unhealthy',
-        details: health
-      });
-    }
-
-    res.json({
-      success: true,
-      data: health
-    });
-  } catch (error) {
-    logger.error('❌ Health check failed:', error);
-    res.status(503).json({
-      success: false,
-      error: 'Health check failed',
-      details: error.message
-    });
-  }
-});
-
-// =====================================================
-// API ROUTES
-// =====================================================
-
-app.use('/api/auth', authRoutes);
-app.use('/api/audio', audioRoutes);
-app.use('/api/transcripts', transcriptRoutes);
-app.use('/api/ai', aiRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/settings', settingsRoutes);
-
-// =====================================================
-// ERROR HANDLING
-// =====================================================
-
-// Handle upload errors
-app.use(handleUploadError);
+// API routes
+app.use('/api', routes);
 
 // 404 handler
-app.use(notFound);
+app.use((req, res) => {
+  logger.warn(`❌ Route not found: ${req.method} ${req.url}`);
+  res.status(404).json({ error: 'Route not found' });
+});
 
-// Global error handler
-app.use(errorHandler);
+// Error handler
+app.use((err, req, res, next) => {
+  logger.error('💥 Express error handler:', {
+    error: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method
+  });
+  
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+  });
+});
 
 // =====================================================
 // SERVER STARTUP
@@ -208,9 +135,16 @@ app.use(errorHandler);
 
 const startServer = async () => {
   try {
+    // Log startup
+    logger.info('🚀 Starting LeepiAI Backend server...');
+    
     // Connect to database with retries
     logger.info('📡 Initializing database connection...');
-    await database.connect();
+    const dbConnected = await database.connect();
+    
+    if (!dbConnected) {
+      throw new Error('Failed to establish database connection after retries');
+    }
 
     // Verify database connection
     if (!database.isDbConnected()) {
@@ -247,78 +181,42 @@ const startServer = async () => {
     // Start HTTP server
     const PORT = config.port;
     const server = app.listen(PORT, () => {
-      logger.info(`🚀 LeepiAI Backend server running on port ${PORT}`);
-      logger.info(`🌍 Environment: ${config.env}`);
-      logger.info(`📊 CORS origin: ${config.cors.origin}`);
-      logger.info(`💾 Database: ${database.getConnectionStatus().state}`);
+      logger.info('✅ Server startup complete:', {
+        port: PORT,
+        environment: config.env,
+        cors: config.cors.origin,
+        database: database.getConnectionStatus()
+      });
     });
 
-    // Graceful shutdown handling
+    // Graceful shutdown
     const gracefulShutdown = async (signal) => {
-      logger.info(`📴 Received ${signal}. Starting graceful shutdown...`);
+      logger.info(`📥 Received ${signal}. Starting graceful shutdown...`);
       
-      // Stop accepting new requests
-      server.close(async () => {
-        logger.info('🔌 HTTP server closed');
-        
-        try {
-          // Close database connection
-          await database.disconnect();
-          logger.info('✅ Graceful shutdown completed');
-          process.exit(0);
-        } catch (error) {
-          logger.error('❌ Error during shutdown:', error);
-          process.exit(1);
-        }
+      // Close HTTP server
+      server.close(() => {
+        logger.info('✅ HTTP server closed');
       });
-
-      // Force shutdown after timeout
-      setTimeout(() => {
-        logger.error('⚠️ Forced shutdown after timeout');
-        process.exit(1);
-      }, 30000); // 30 seconds timeout
+      
+      // Disconnect from database
+      await database.disconnect();
+      
+      // Exit process
+      process.exit(0);
     };
 
-    // Handle shutdown signals
+    // Listen for shutdown signals
     process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
     process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-    // Handle uncaught exceptions
-    process.on('uncaughtException', (error) => {
-      logger.error('💥 Uncaught Exception:', {
-        error: error.message,
-        stack: error.stack,
-        type: error.name
-      });
-      gracefulShutdown('UNCAUGHT_EXCEPTION');
-    });
-
-    // Handle unhandled promise rejections
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('💥 Unhandled Rejection:', {
-        reason: reason instanceof Error ? reason.message : reason,
-        stack: reason instanceof Error ? reason.stack : undefined,
-        promise: promise
-      });
-      gracefulShutdown('UNHANDLED_REJECTION');
-    });
-
-    return server;
   } catch (error) {
-    logger.error('❌ Failed to start server:', {
+    logger.error('💥 Failed to start server:', {
       error: error.message,
-      stack: error.stack,
-      type: error.name
+      stack: error.stack
     });
-    
-    // Exit with error
     process.exit(1);
   }
 };
 
-// Start server if this file is run directly
-if (require.main === module) {
-  startServer();
-}
-
-module.exports = { app, startServer }; 
+// Start the server
+startServer(); 
