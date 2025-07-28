@@ -581,6 +581,264 @@ class DatabaseService {
   }
 
   // =====================================================
+  // ADMIN OPERATIONS
+  // =====================================================
+
+  /**
+   * Get all transcripts for admin with filtering
+   * @param {Object} options - Filter and pagination options
+   * @returns {Promise<Object>} Transcripts and total count
+   */
+  async getAllTranscriptsForAdmin(options = {}) {
+    try {
+      const {
+        limit = 20,
+        offset = 0,
+        sortBy = 'createdAt',
+        sortOrder = -1,
+        includeSegments = false,
+        userId = null,
+        search = null,
+        hasSummary = null,
+        hasDebrief = null
+      } = options;
+
+      // Build query
+      let query = {};
+
+      if (userId) {
+        query.userId = userId;
+      }
+
+      if (hasSummary !== null) {
+        query.summary = hasSummary ? { $exists: true, $ne: null, $ne: '' } : { $in: [null, '', undefined] };
+      }
+
+      if (hasDebrief !== null) {
+        query.debrief = hasDebrief ? { $exists: true, $ne: null } : { $in: [null, undefined] };
+      }
+
+      // Build aggregation pipeline
+      let pipeline = [
+        { $match: query }
+      ];
+
+      // Add search if provided
+      if (search) {
+        pipeline.push({
+          $match: {
+            $or: [
+              { title: { $regex: search, $options: 'i' } },
+              { content: { $regex: search, $options: 'i' } },
+              { summary: { $regex: search, $options: 'i' } }
+            ]
+          }
+        });
+      }
+
+      // Add lookup for user information
+      pipeline.push({
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: 'id',
+          as: 'user'
+        }
+      });
+
+      // Unwind user array
+      pipeline.push({
+        $unwind: {
+          path: '$user',
+          preserveNullAndEmptyArrays: true
+        }
+      });
+
+      // Add user info to transcript
+      pipeline.push({
+        $addFields: {
+          userInfo: {
+            name: {
+              $concat: [
+                { $ifNull: ['$user.firstName', ''] },
+                ' ',
+                { $ifNull: ['$user.lastName', ''] }
+              ]
+            },
+            email: { $ifNull: ['$user.email', 'Unknown'] }
+          }
+        }
+      });
+
+      // Get total count
+      const countPipeline = [...pipeline, { $count: 'total' }];
+      const countResult = await Transcript.aggregate(countPipeline);
+      const total = countResult[0]?.total || 0;
+
+      // Add sorting and pagination
+      pipeline.push(
+        { $sort: { [sortBy]: sortOrder } },
+        { $skip: offset },
+        { $limit: limit }
+      );
+
+      // Remove segments if not requested
+      if (!includeSegments) {
+        pipeline.push({
+          $project: {
+            segments: 0
+          }
+        });
+      }
+
+      const transcripts = await Transcript.aggregate(pipeline);
+
+      return {
+        transcripts,
+        total
+      };
+    } catch (error) {
+      logger.error('❌ Failed to get all transcripts for admin:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get specific transcript for admin (no user restriction)
+   * @param {string} transcriptId - Transcript ID
+   * @returns {Promise<Object|null>} Transcript object or null
+   */
+  async getTranscriptForAdmin(transcriptId) {
+    try {
+      const transcript = await Transcript.findOne({ id: transcriptId })
+        .populate('userId', 'firstName lastName email')
+        .lean();
+
+      if (!transcript) {
+        return null;
+      }
+
+      // Add user info
+      transcript.userInfo = transcript.userId ? {
+        name: `${transcript.userId.firstName || ''} ${transcript.userId.lastName || ''}`.trim() || 'Unknown User',
+        email: transcript.userId.email || 'No email'
+      } : null;
+
+      return transcript;
+    } catch (error) {
+      logger.error('❌ Failed to get transcript for admin:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all users for admin with filtering and transcript counts
+   * @param {Object} options - Filter and pagination options
+   * @returns {Promise<Object>} Users and total count
+   */
+  async getAllUsersForAdmin(options = {}) {
+    try {
+      const {
+        limit = 20,
+        offset = 0,
+        sortBy = 'createdAt',
+        sortOrder = -1,
+        search = null,
+        role = null,
+        isActive = null
+      } = options;
+
+      // Build query
+      let query = {};
+
+      if (role) {
+        query.role = role;
+      }
+
+      if (isActive !== null) {
+        query.isActive = isActive;
+      }
+
+      // Build aggregation pipeline
+      let pipeline = [
+        { $match: query }
+      ];
+
+      // Add search if provided
+      if (search) {
+        pipeline.push({
+          $match: {
+            $or: [
+              { firstName: { $regex: search, $options: 'i' } },
+              { lastName: { $regex: search, $options: 'i' } },
+              { email: { $regex: search, $options: 'i' } }
+            ]
+          }
+        });
+      }
+
+      // Add lookup for transcript count
+      pipeline.push({
+        $lookup: {
+          from: 'transcripts',
+          localField: 'id',
+          foreignField: 'userId',
+          as: 'transcripts'
+        }
+      });
+
+      // Add transcript count
+      pipeline.push({
+        $addFields: {
+          transcriptCount: { $size: '$transcripts' },
+          lastTranscriptAt: {
+            $max: '$transcripts.createdAt'
+          }
+        }
+      });
+
+      // Get total count
+      const countPipeline = [...pipeline, { $count: 'total' }];
+      const countResult = await User.aggregate(countPipeline);
+      const total = countResult[0]?.total || 0;
+
+      // Add sorting and pagination
+      pipeline.push(
+        { $sort: { [sortBy]: sortOrder } },
+        { $skip: offset },
+        { $limit: limit }
+      );
+
+      // Project final fields
+      pipeline.push({
+        $project: {
+          id: 1,
+          email: 1,
+          firstName: 1,
+          lastName: 1,
+          role: 1,
+          isActive: 1,
+          lastLoginAt: 1,
+          createdAt: 1,
+          transcriptCount: 1,
+          lastTranscriptAt: 1,
+          preferences: 1
+        }
+      });
+
+      const users = await User.aggregate(pipeline);
+
+      return {
+        users,
+        total
+      };
+    } catch (error) {
+      logger.error('❌ Failed to get all users for admin:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
   // SETTINGS MANAGEMENT
   // =====================================================
 
