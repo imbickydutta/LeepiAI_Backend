@@ -91,19 +91,46 @@ app.use(morgan('combined', { stream: { write: message => logger.info(message.tri
 // ROUTES
 // =====================================================
 
+// Basic status endpoint (no database required)
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'LeepiAI Backend API is running',
+    version: '1.0.0',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
-  const health = {
-    uptime: process.uptime(),
-    timestamp: Date.now(),
-    database: database.getConnectionStatus(),
-    memory: process.memoryUsage()
-  };
-  
-  // Log health check
-  logger.info('📊 Health Check:', health);
-  
-  res.json(health);
+  try {
+    const health = {
+      uptime: process.uptime(),
+      timestamp: Date.now(),
+      database: {
+        connected: database.isDbConnected(),
+        status: database.isDbConnected() ? 'connected' : 'connecting'
+      },
+      memory: process.memoryUsage(),
+      environment: process.env.NODE_ENV
+    };
+    
+    // Log health check
+    logger.info('📊 Health Check:', health);
+    
+    res.json({
+      success: true,
+      ...health
+    });
+  } catch (error) {
+    logger.error('❌ Health check error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Health check failed',
+      message: error.message
+    });
+  }
 });
 
 // API routes
@@ -138,55 +165,46 @@ const startServer = async () => {
     // Log startup
     logger.info('🚀 Starting LeepiAI Backend server...');
     
-    // Connect to database with retries
-    logger.info('📡 Initializing database connection...');
-    const dbConnected = await database.connect();
-    
-    if (!dbConnected) {
-      throw new Error('Failed to establish database connection after retries');
-    }
-
-    // Verify database connection
-    if (!database.isDbConnected()) {
-      throw new Error('Database connection verification failed');
-    }
-
-    // Initialize models
-    logger.info('🔍 Loading database models...');
-    const User = require('./models/User');
-    const Session = require('./models/Session');
-    const Settings = require('./models/Settings');
-
-    // Wait for models to be ready
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Create indexes if needed
-    logger.info('📊 Verifying database indexes...');
-    
-    try {
-      await Promise.all([
-        User.ensureIndexes(),
-        Session.ensureIndexes(),
-        Settings.ensureIndexes()
-      ]);
-      logger.info('✅ Database indexes verified');
-    } catch (error) {
-      // Log error but continue startup
-      logger.error('⚠️ Failed to verify indexes:', {
-        error: error.message,
-        stack: error.stack
-      });
-    }
-
-    // Start HTTP server
+    // Start HTTP server first (don't wait for database)
     const PORT = config.port;
     const server = app.listen(PORT, () => {
       logger.info('✅ Server startup complete:', {
         port: PORT,
         environment: config.env,
-        cors: config.cors.origin,
-        database: database.getConnectionStatus()
+        cors: config.cors.origin
       });
+    });
+
+    // Connect to database asynchronously (non-blocking)
+    setImmediate(async () => {
+      try {
+        logger.info('📡 Initializing database connection...');
+        const dbConnected = await database.connect();
+        
+        if (dbConnected && database.isDbConnected()) {
+          logger.info('✅ Database connected successfully');
+          
+          // Initialize models and indexes after connection
+          const User = require('./models/User');
+          const Session = require('./models/Session');
+          const Settings = require('./models/Settings');
+
+          // Create indexes if needed (non-blocking)
+          Promise.all([
+            User.ensureIndexes(),
+            Session.ensureIndexes(),
+            Settings.ensureIndexes()
+          ]).then(() => {
+            logger.info('✅ Database indexes verified');
+          }).catch(error => {
+            logger.warn('⚠️ Index verification failed (non-critical):', error.message);
+          });
+        } else {
+          logger.warn('⚠️ Database connection failed, but server is running');
+        }
+      } catch (error) {
+        logger.warn('⚠️ Database initialization failed, but server is running:', error.message);
+      }
     });
 
     // Graceful shutdown
@@ -199,7 +217,11 @@ const startServer = async () => {
       });
       
       // Disconnect from database
-      await database.disconnect();
+      try {
+        await database.disconnect();
+      } catch (error) {
+        logger.warn('⚠️ Error disconnecting from database:', error.message);
+      }
       
       // Exit process
       process.exit(0);
