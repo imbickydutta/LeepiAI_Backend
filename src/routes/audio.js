@@ -412,10 +412,23 @@ router.post('/upload-dual-chunk',
         hasSystem: !!system
       });
 
-      // Process dual audio
+      // Process dual audio with transcoding if needed
+      let micPath = microphone?.path;
+      let sysPath = system?.path;
+
+      // If files are raw PCM, transcode them first
+      if (micPath && micPath.endsWith('.raw')) {
+        const transcodedMic = await audioService._transcodeAudio(micPath, micPath.replace('.raw', '.wav'));
+        micPath = transcodedMic;
+      }
+      if (sysPath && sysPath.endsWith('.raw')) {
+        const transcodedSys = await audioService._transcodeAudio(sysPath, sysPath.replace('.raw', '.wav'));
+        sysPath = transcodedSys;
+      }
+
       const transcriptionResult = await audioService.transcribeDualAudio(
-        microphone?.path,
-        system?.path
+        micPath,
+        sysPath
       );
 
       if (!transcriptionResult.success) {
