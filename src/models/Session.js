@@ -4,27 +4,29 @@ const { v4: uuidv4 } = require('uuid');
 const sessionSchema = new mongoose.Schema({
   id: {
     type: String,
-    unique: true,
+    index: true,
     default: uuidv4
   },
   userId: {
     type: String,
     required: [true, 'User ID is required'],
-    ref: 'User'
+    ref: 'User',
+    index: true
   },
   token: {
     type: String,
     required: [true, 'Token is required'],
-    unique: true
+    index: true
   },
   refreshToken: {
     type: String,
     required: [true, 'Refresh token is required'],
-    unique: true
+    index: true
   },
   expiresAt: {
     type: Date,
-    required: [true, 'Expiration date is required']
+    required: [true, 'Expiration date is required'],
+    index: true
   },
   refreshExpiresAt: {
     type: Date,
@@ -37,7 +39,8 @@ const sessionSchema = new mongoose.Schema({
   },
   isActive: {
     type: Boolean,
-    default: true
+    default: true,
+    index: true
   },
   lastUsedAt: {
     type: Date,
@@ -47,14 +50,17 @@ const sessionSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for performance
-sessionSchema.index({ userId: 1 });
-sessionSchema.index({ token: 1 });
-sessionSchema.index({ refreshToken: 1 });
-sessionSchema.index({ expiresAt: 1 });
-sessionSchema.index({ refreshExpiresAt: 1 });
+// Create unique indexes
+sessionSchema.index({ id: 1 }, { unique: true });
+sessionSchema.index({ token: 1 }, { unique: true });
+sessionSchema.index({ refreshToken: 1 }, { unique: true });
 
-// Automatically remove expired sessions
+// Compound indexes for performance
+sessionSchema.index({ userId: 1, isActive: 1 });
+sessionSchema.index({ expiresAt: 1, isActive: 1 });
+sessionSchema.index({ refreshExpiresAt: 1, isActive: 1 });
+
+// TTL index for automatic expiration
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Static method to find by token

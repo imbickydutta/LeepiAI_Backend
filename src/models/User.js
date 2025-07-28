@@ -5,13 +5,13 @@ const { v4: uuidv4 } = require('uuid');
 const userSchema = new mongoose.Schema({
   id: {
     type: String,
-    unique: true,
+    index: true,
     default: uuidv4
   },
   email: {
     type: String,
     required: [true, 'Email is required'],
-    unique: true,
+    index: true,
     lowercase: true,
     trim: true,
     match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
@@ -64,10 +64,14 @@ const userSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for performance
-userSchema.index({ email: 1 });
-userSchema.index({ id: 1 });
+// Create unique indexes
+userSchema.index({ email: 1 }, { unique: true });
+userSchema.index({ id: 1 }, { unique: true });
+
+// Additional indexes for performance
 userSchema.index({ createdAt: -1 });
+userSchema.index({ role: 1 });
+userSchema.index({ isActive: 1 });
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
