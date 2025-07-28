@@ -64,8 +64,8 @@ router.get('/transcripts',
     query('includeSegments').optional().isBoolean().withMessage('includeSegments must be boolean'),
     query('userId').optional().isString().withMessage('userId must be a string'),
     query('search').optional().isString().withMessage('search must be a string'),
-    query('hasSummary').optional().isBoolean().withMessage('hasSummary must be boolean'),
-    query('hasDebrief').optional().isBoolean().withMessage('hasDebrief must be boolean')
+    query('hasSummary').optional().isIn(['true', 'false', '']).withMessage('hasSummary must be true, false, or empty'),
+    query('hasDebrief').optional().isIn(['true', 'false', '']).withMessage('hasDebrief must be true, false, or empty')
   ],
   handleValidationErrors,
   asyncHandler(async (req, res) => {
@@ -87,8 +87,8 @@ router.get('/transcripts',
       sortBy,
       sortOrder: sortOrder === 'desc' ? -1 : 1,
       includeSegments: includeSegments === 'true',
-      userId: userId || null,
-      search: search || null,
+      userId: userId && userId.trim() !== '' ? userId : null,
+      search: search && search.trim() !== '' ? search : null,
       hasSummary: hasSummary === 'true' ? true : hasSummary === 'false' ? false : null,
       hasDebrief: hasDebrief === 'true' ? true : hasDebrief === 'false' ? false : null
     };

@@ -591,6 +591,8 @@ class DatabaseService {
    */
   async getAllTranscriptsForAdmin(options = {}) {
     try {
+      logger.info('🔍 getAllTranscriptsForAdmin called with options:', options);
+      
       const {
         limit = 20,
         offset = 0,
@@ -617,6 +619,8 @@ class DatabaseService {
       if (hasDebrief !== null) {
         query.debrief = hasDebrief ? { $exists: true, $ne: null } : { $in: [null, undefined] };
       }
+
+      logger.info('🔍 Built query:', query);
 
       // Build aggregation pipeline
       let pipeline = [
@@ -672,8 +676,10 @@ class DatabaseService {
 
       // Get total count
       const countPipeline = [...pipeline, { $count: 'total' }];
+      logger.info('🔍 Count pipeline:', JSON.stringify(countPipeline, null, 2));
       const countResult = await Transcript.aggregate(countPipeline);
       const total = countResult[0]?.total || 0;
+      logger.info('🔍 Total count:', total);
 
       // Add sorting and pagination
       pipeline.push(
@@ -691,7 +697,9 @@ class DatabaseService {
         });
       }
 
+      logger.info('🔍 Main pipeline:', JSON.stringify(pipeline, null, 2));
       const transcripts = await Transcript.aggregate(pipeline);
+      logger.info('🔍 Found transcripts:', transcripts.length);
 
       return {
         transcripts,
