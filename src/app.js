@@ -2,17 +2,35 @@
 // IMPORTS & SETUP
 // =====================================================
 
+console.log('🔍 Starting app initialization...');
+
 const express = require('express');
+console.log('✅ Express loaded');
+
 const cors = require('cors');
+console.log('✅ CORS loaded');
+
 const helmet = require('helmet');
+console.log('✅ Helmet loaded');
+
 const morgan = require('morgan');
+console.log('✅ Morgan loaded');
+
 const logger = require('./utils/logger');
+console.log('✅ Logger loaded');
+
 const config = require('./config/env');
+console.log('✅ Config loaded');
+
 const database = require('./config/database');
+console.log('✅ Database config loaded');
+
 const routes = require('./routes');
+console.log('✅ Routes loaded');
 
 // Initialize express app
 const app = express();
+console.log('✅ Express app initialized');
 
 // =====================================================
 // ERROR HANDLERS

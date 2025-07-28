@@ -1,10 +1,8 @@
 const winston = require('winston');
 const path = require('path');
-const fs = require('fs-extra');
 
-// Ensure logs directory exists
-const logsDir = path.join(__dirname, '../../logs');
-fs.ensureDirSync(logsDir);
+// Production-safe logger that doesn't write to filesystem
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Custom format for console output
 const consoleFormat = winston.format.combine(
@@ -19,93 +17,98 @@ const consoleFormat = winston.format.combine(
   })
 );
 
-// Custom format for file output
-const fileFormat = winston.format.combine(
+// Custom format for JSON output (production)
+const jsonFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.json()
 );
 
+// Create transports based on environment
+const transports = [];
+
+if (isProduction) {
+  // Production: only console output in JSON format for cloud logging
+  transports.push(
+    new winston.transports.Console({
+      format: jsonFormat,
+      level: 'info'
+    })
+  );
+} else {
+  // Development: console + file logging
+  const fs = require('fs-extra');
+  
+  try {
+    // Ensure logs directory exists (only in development)
+    const logsDir = path.join(__dirname, '../../logs');
+    fs.ensureDirSync(logsDir);
+    
+    // Console transport
+    transports.push(
+      new winston.transports.Console({
+        format: consoleFormat,
+        level: 'debug'
+      })
+    );
+    
+    // File transports
+    transports.push(
+      new winston.transports.File({
+        filename: path.join(logsDir, 'error.log'),
+        level: 'error',
+        format: jsonFormat,
+        maxsize: 5242880, // 5MB
+        maxFiles: 5
+      }),
+      new winston.transports.File({
+        filename: path.join(logsDir, 'combined.log'),
+        format: jsonFormat,
+        maxsize: 5242880, // 5MB
+        maxFiles: 5
+      })
+    );
+  } catch (error) {
+    // Fallback to console only if file system fails
+    console.warn('Failed to setup file logging, using console only:', error.message);
+    transports.push(
+      new winston.transports.Console({
+        format: consoleFormat,
+        level: 'debug'
+      })
+    );
+  }
+}
+
 // Create logger instance
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  defaultMeta: { service: 'leepi-backend' },
-  transports: [
-    // Console transport
-    new winston.transports.Console({
-      format: consoleFormat,
-      level: 'debug'
-    }),
-    
-    // File transport for all logs
-    new winston.transports.File({
-      filename: path.join(logsDir, 'app.log'),
-      format: fileFormat,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    }),
-    
-    // Separate file for errors
-    new winston.transports.File({
-      filename: path.join(logsDir, 'error.log'),
-      level: 'error',
-      format: fileFormat,
-      maxsize: 5242880, // 5MB
-      maxFiles: 5
-    })
-  ],
-  
-  // Handle exceptions and rejections
-  exceptionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logsDir, 'exceptions.log'),
-      format: fileFormat
-    })
-  ],
-  rejectionHandlers: [
-    new winston.transports.File({
-      filename: path.join(logsDir, 'rejections.log'),
-      format: fileFormat
-    })
-  ]
+  level: isProduction ? 'info' : 'debug',
+  format: isProduction ? jsonFormat : consoleFormat,
+  transports: transports,
+  exitOnError: false,
+  handleExceptions: true,
+  handleRejections: true
 });
 
-// Add request logging helper
+// Add request logging middleware
 logger.logRequest = (req, res, next) => {
   const start = Date.now();
+  const originalSend = res.send;
   
-  res.on('finish', () => {
+  res.send = function(data) {
     const duration = Date.now() - start;
-    const logData = {
+    logger.info('HTTP Request', {
       method: req.method,
       url: req.url,
       status: res.statusCode,
       duration: `${duration}ms`,
-      ip: req.ip,
-      userAgent: req.get('User-Agent')
-    };
-    
-    if (res.statusCode >= 400) {
-      logger.warn('HTTP Request', logData);
-    } else {
-      logger.info('HTTP Request', logData);
-    }
-  });
+      userAgent: req.get('User-Agent'),
+      ip: req.ip
+    });
+    originalSend.call(this, data);
+  };
   
   next();
-};
-
-// Add API error logging helper
-logger.logApiError = (error, req, additionalInfo = {}) => {
-  logger.error('API Error', {
-    error: error.message,
-    stack: error.stack,
-    method: req?.method,
-    url: req?.url,
-    ip: req?.ip,
-    userId: req?.user?.id,
-    ...additionalInfo
-  });
 };
 
 module.exports = logger; 
