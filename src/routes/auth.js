@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const authService = require('../services/AuthService');
 const { authenticate } = require('../middleware/auth');
+const { requireDatabase } = require('../middleware/databaseCheck');
 const { asyncHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
@@ -66,6 +67,7 @@ const handleValidationErrors = (req, res, next) => {
 router.post('/register', 
   validateRegister,
   handleValidationErrors,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { email, password, firstName, lastName } = req.body;
     
@@ -113,6 +115,7 @@ router.post('/register',
 router.post('/login',
   validateLogin,
   handleValidationErrors,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
     
