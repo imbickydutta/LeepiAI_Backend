@@ -189,36 +189,30 @@ const startServer = async () => {
           const Session = require('./models/Session');
           const Settings = require('./models/Settings');
 
-          // Create indexes if needed (non-blocking, with individual error handling)
-          const createIndexes = async () => {
-            try {
-              await User.ensureIndexes();
-              logger.info('✅ User indexes verified');
-            } catch (error) {
-              logger.warn('⚠️ User index verification failed:', error.message);
-            }
-            
-            try {
-              await Session.ensureIndexes();
-              logger.info('✅ Session indexes verified');
-            } catch (error) {
-              logger.warn('⚠️ Session index verification failed:', error.message);
-            }
-            
-            try {
-              await Settings.ensureIndexes();
-              logger.info('✅ Settings indexes verified');
-            } catch (error) {
-              logger.warn('⚠️ Settings index verification failed:', error.message);
-            }
-            
-            logger.info('✅ Database indexes verification completed');
-          };
+          // Temporarily disable index creation to prevent infinite loop
+          logger.info('⚠️ Index creation temporarily disabled to prevent infinite loop');
           
-          // Run index creation asynchronously
-          createIndexes().catch(error => {
-            logger.warn('⚠️ Index creation process failed:', error.message);
-          });
+          // TODO: Re-enable index creation once the infinite loop issue is resolved
+          // const createIndexes = async () => {
+          //   try {
+          //     logger.info('🔧 Starting database index verification...');
+          //     
+          //     if (typeof User.ensureIndexes === 'function') {
+          //       await User.ensureIndexes();
+          //       logger.info('✅ User indexes verified');
+          //     }
+          //     
+          //     logger.info('✅ Database indexes verification completed');
+          //   } catch (error) {
+          //     logger.error('❌ Index creation process failed:', error.message);
+          //   }
+          // };
+          // 
+          // setTimeout(() => {
+          //   createIndexes().catch(error => {
+          //     logger.warn('⚠️ Index creation process failed:', error.message);
+          //   });
+          // }, 1000);
         } else {
           logger.warn('⚠️ Database connection failed, but server is running');
         }

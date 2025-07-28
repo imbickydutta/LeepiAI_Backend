@@ -81,25 +81,14 @@ const indexes = [
   { fields: { email: 1, isActive: 1 }, options: { name: 'email_isActive' } }
 ];
 
-// Create all indexes
-indexes.forEach(index => {
-  userSchema.index(index.fields, index.options);
-});
-
-// Flag to prevent multiple index creation calls
-let indexesCreated = false;
+// Don't create indexes automatically - let ensureIndexes handle it
+// indexes.forEach(index => {
+//   userSchema.index(index.fields, index.options);
+// });
 
 // Static method to ensure indexes exist
 userSchema.statics.ensureIndexes = async function() {
-  // Prevent multiple calls
-  if (indexesCreated) {
-    logger.debug('📊 User indexes already created, skipping...');
-    return true;
-  }
-
   try {
-    logger.info('🔍 Creating User model indexes...');
-
     // Wait for connection to be ready
     if (mongoose.connection.readyState !== 1) {
       logger.warn('⚠️ Database connection not ready, skipping index creation');
@@ -111,25 +100,37 @@ userSchema.statics.ensureIndexes = async function() {
       .collection('users')
       .indexes();
 
-    logger.info('📊 Current indexes:', 
-      existingIndexes.map(idx => ({
-        name: idx.name,
-        key: idx.key
-      }))
+    // Check if we already have the required indexes
+    const hasRequiredIndexes = existingIndexes.some(idx => 
+      idx.name === 'email_unique' || idx.name === 'id_unique'
     );
-    
-    // Only create indexes if they don't exist
-    if (existingIndexes.length <= 1) { // Only _id index exists
-      logger.info('🔄 Creating missing indexes...');
-      await this.syncIndexes();
-    } else {
-      logger.info('✅ Indexes already exist, skipping creation');
+
+    if (hasRequiredIndexes) {
+      logger.info('✅ User indexes already exist, skipping creation');
+      return true;
     }
+
+    logger.info('🔍 Creating User model indexes...');
     
-    // Mark as completed
-    indexesCreated = true;
+    // Create indexes manually instead of using syncIndexes
+    const collection = mongoose.connection.db.collection('users');
     
-    logger.info('✅ User model indexes ready');
+    // Create email unique index
+    await collection.createIndex({ email: 1 }, { unique: true, name: 'email_unique' });
+    logger.info('✅ Created email_unique index');
+    
+    // Create id unique index
+    await collection.createIndex({ id: 1 }, { unique: true, name: 'id_unique' });
+    logger.info('✅ Created id_unique index');
+    
+    // Create other performance indexes
+    await collection.createIndex({ createdAt: -1 }, { name: 'createdAt_desc' });
+    await collection.createIndex({ role: 1 }, { name: 'role_asc' });
+    await collection.createIndex({ isActive: 1 }, { name: 'isActive_asc' });
+    await collection.createIndex({ role: 1, isActive: 1 }, { name: 'role_isActive' });
+    await collection.createIndex({ email: 1, isActive: 1 }, { name: 'email_isActive' });
+    
+    logger.info('✅ User model indexes created successfully');
     return true;
   } catch (error) {
     logger.error('❌ Failed to create User model indexes:', {
