@@ -14,8 +14,14 @@ class AudioService {
     } else {
       this.openai = new OpenAI({
         apiKey: config.apis.openai,
-        timeout: 60000, // Increase timeout to 60 seconds
-        maxRetries: 3
+        timeout: 120000, // Increase timeout to 2 minutes for large files
+        maxRetries: 5, // Increase retries
+        httpAgent: new (require('https').Agent)({
+          keepAlive: true,
+          keepAliveMsecs: 30000,
+          maxSockets: 10,
+          maxFreeSockets: 5
+        })
       });
     }
     
@@ -29,9 +35,10 @@ class AudioService {
     
     logger.info('🎵 AudioService initialized');
     
-    // Test OpenAI API connection asynchronously (completely non-blocking)
+    // Test OpenAI API connection with warmup delay for cold start
     if (this.openai) {
-      setImmediate(() => {
+      // Delay connection test to allow Railway container to warm up
+      setTimeout(() => {
         this._testOpenAIConnection()
           .then(() => {
             logger.info('✅ OpenAI API connection verified');
@@ -39,7 +46,7 @@ class AudioService {
           .catch(error => {
             logger.warn('⚠️ OpenAI API connection test failed (service will still work):', error.message);
           });
-      });
+      }, 10000); // 10 second delay for Railway cold start
     } else {
       logger.error('❌ OpenAI API key is missing. Audio transcription features will not work.');
       logger.info('💡 To fix this, add OPENAI_API_KEY to your Railway environment variables.');
@@ -137,6 +144,15 @@ class AudioService {
         throw new Error('OpenAI API is not configured. Please check your API key.');
       }
 
+      // Perform a quick health check before transcription
+      try {
+        await this._testOpenAIConnection();
+        logger.info('✅ OpenAI API health check passed before transcription');
+      } catch (healthError) {
+        logger.warn('⚠️ OpenAI API health check failed, but proceeding with transcription:', healthError.message);
+        // Don't throw here, let the transcription attempt proceed
+      }
+
       const {
         language = 'en',
         responseFormat = 'verbose_json',
@@ -189,10 +205,14 @@ class AudioService {
             if (attempt < 3) {
               logger.warn(`⚠️ Transcription attempt ${attempt} failed, retrying...`, {
                 error: retryError.message,
-                attempt: attempt
+                attempt: attempt,
+                status: retryError.status,
+                code: retryError.code
               });
-              // Wait before retry (exponential backoff)
-              await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+              // Progressive backoff: 2s, 5s, 10s
+              const delay = Math.pow(2, attempt) * 1000;
+              logger.info(`⏳ Waiting ${delay}ms before retry ${attempt + 1}/3`);
+              await new Promise(resolve => setTimeout(resolve, delay));
             }
           }
         }
@@ -222,9 +242,16 @@ class AudioService {
           logger.error('❌ OpenAI API connection failed:', {
             error: error.message,
             status: error.status,
-            type: error.constructor.name
+            type: error.constructor.name,
+            code: error.code
           });
-          throw new Error('Cannot connect to OpenAI API. Please check your internet connection and try again.');
+          
+          // Railway-specific error handling
+          if (process.env.NODE_ENV === 'production') {
+            throw new Error('Railway deployment cannot connect to OpenAI API. This may be due to network restrictions or cold start issues. Please try again in a few minutes.');
+          } else {
+            throw new Error('Cannot connect to OpenAI API. Please check your internet connection and try again.');
+          }
         }
 
         if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
