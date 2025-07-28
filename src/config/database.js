@@ -22,14 +22,22 @@ class Database {
     };
 
     // Debug environment variables
-    logger.info('🔍 Environment Debug:', {
+    const debugInfo = {
       NODE_ENV: process.env.NODE_ENV,
       MONGODB_URI_exists: !!process.env.MONGODB_URI,
       MONGODB_URI_PROD_exists: !!process.env.MONGODB_URI_PROD,
       configType: typeof config,
       configDatabaseExists: !!config.database,
       configDatabaseUri: config.database ? !!config.database.uri : 'config.database is undefined'
-    });
+    };
+    
+    logger.info('🔍 Environment Debug:');
+    console.log('DEBUG INFO:', JSON.stringify(debugInfo, null, 2));
+    
+    if (!process.env.MONGODB_URI_PROD && process.env.NODE_ENV === 'production') {
+      logger.error('❌ CRITICAL: MONGODB_URI_PROD environment variable is missing!');
+      console.log('Available env vars starting with MONGO:', Object.keys(process.env).filter(key => key.includes('MONGO')));
+    }
 
     // Log connection attempt
     logger.info('📡 Attempting database connection...', {
@@ -96,6 +104,15 @@ class Database {
         retry: this.currentRetry + 1,
         maxRetries: this.maxRetries
       });
+      
+      // Additional error logging for debugging
+      console.log('DATABASE CONNECTION ERROR:');
+      console.log('Error message:', error.message);
+      console.log('Error code:', error.code);
+      console.log('Error name:', error.name);
+      if (error.reason) {
+        console.log('Error reason:', JSON.stringify(error.reason, null, 2));
+      }
 
       this.isConnected = false;
 
