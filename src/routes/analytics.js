@@ -168,8 +168,8 @@ router.get('/users',
     query('sortBy').optional().isIn(['createdAt', 'lastLoginAt', 'transcriptCount']).withMessage('Invalid sort field'),
     query('sortOrder').optional().isIn(['asc', 'desc']).withMessage('Sort order must be asc or desc'),
     query('search').optional().isString().withMessage('search must be a string'),
-    query('role').optional().isIn(['user', 'admin']).withMessage('role must be user or admin'),
-    query('isActive').optional().isBoolean().withMessage('isActive must be boolean')
+    query('role').optional().isIn(['user', 'admin', '']).withMessage('role must be user or admin'),
+    query('isActive').optional().isIn(['true', 'false', '']).withMessage('isActive must be true, false, or empty')
   ],
   handleValidationErrors,
   asyncHandler(async (req, res) => {
@@ -188,8 +188,8 @@ router.get('/users',
       offset: parseInt(offset),
       sortBy,
       sortOrder: sortOrder === 'desc' ? -1 : 1,
-      search: search || null,
-      role: role || null,
+      search: search && search.trim() !== '' ? search : null,
+      role: role && role.trim() !== '' ? role : null,
       isActive: isActive === 'true' ? true : isActive === 'false' ? false : null
     };
 
