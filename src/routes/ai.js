@@ -457,26 +457,19 @@ router.get('/test-completion',
         });
       }
       
-      // Test with a simple completion using different model
-      const completion = await audioService.openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'user',
-            content: 'Hi'
-          }
-        ],
-        max_tokens: 10,
-        temperature: 0
+      // Test with embeddings instead of chat completion
+      const embedding = await audioService.openai.embeddings.create({
+        model: 'text-embedding-3-small',
+        input: 'Hello world'
       });
       
-      const response = completion.choices[0]?.message?.content || 'No response';
+      const embeddingData = embedding.data[0]?.embedding || [];
       
       res.json({
         success: true,
-        message: 'OpenAI completion test successful',
-        response: response,
-        model: 'gpt-3.5-turbo',
+        message: 'OpenAI embeddings test successful',
+        embeddingLength: embeddingData.length,
+        model: 'text-embedding-3-small',
         environment: process.env.NODE_ENV,
         timestamp: new Date().toISOString()
       });
