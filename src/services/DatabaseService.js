@@ -718,19 +718,26 @@ class DatabaseService {
    */
   async getTranscriptForAdmin(transcriptId) {
     try {
-      const transcript = await Transcript.findOne({ id: transcriptId })
-        .populate('userId', 'firstName lastName email')
-        .lean();
+      const transcript = await Transcript.findOne({ id: transcriptId }).lean();
 
       if (!transcript) {
         return null;
       }
 
+      // Manually fetch user info since userId is a string, not ObjectId
+      let userInfo = null;
+      if (transcript.userId) {
+        const user = await User.findOne({ id: transcript.userId }).select('firstName lastName email').lean();
+        if (user) {
+          userInfo = {
+            name: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Unknown User',
+            email: user.email || 'No email'
+          };
+        }
+      }
+
       // Add user info
-      transcript.userInfo = transcript.userId ? {
-        name: `${transcript.userId.firstName || ''} ${transcript.userId.lastName || ''}`.trim() || 'Unknown User',
-        email: transcript.userId.email || 'No email'
-      } : null;
+      transcript.userInfo = userInfo;
 
       return transcript;
     } catch (error) {
