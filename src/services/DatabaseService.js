@@ -509,7 +509,6 @@ class DatabaseService {
         Transcript.find()
           .sort({ createdAt: -1 })
           .limit(10)
-          .populate('userId', 'firstName lastName email')
           .select('title createdAt metadata.duration userId')
           .lean()
       ]);
@@ -539,16 +538,26 @@ class DatabaseService {
         total: transcripts.totalStorage || 0
       };
 
-      // Format recent activity with null-safe access
-      const activity = recentActivity.map(t => ({
-        id: t.id,
-        title: t.title || 'Untitled',
-        duration: t.metadata?.duration || 0,
-        createdAt: t.createdAt,
-        user: t.userId ? {
-          name: `${t.userId.firstName || ''} ${t.userId.lastName || ''}`.trim() || 'Unknown User',
-          email: t.userId.email || 'No email'
-        } : null
+      // Format recent activity with null-safe access and manual user lookup
+      const activity = await Promise.all(recentActivity.map(async (t) => {
+        let user = null;
+        if (t.userId) {
+          const userDoc = await User.findOne({ id: t.userId }).select('firstName lastName email').lean();
+          if (userDoc) {
+            user = {
+              name: `${userDoc.firstName || ''} ${userDoc.lastName || ''}`.trim() || 'Unknown User',
+              email: userDoc.email || 'No email'
+            };
+          }
+        }
+        
+        return {
+          id: t.id,
+          title: t.title || 'Untitled',
+          duration: t.metadata?.duration || 0,
+          createdAt: t.createdAt,
+          user
+        };
       }));
 
       return {
