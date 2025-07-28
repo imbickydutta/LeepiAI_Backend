@@ -57,7 +57,7 @@ class AudioService {
       this.logger.error('❌ OpenAI API key is missing. Audio transcription will not work.');
       this.openai = null;
     } else {
-      this.openai = new OpenAI({
+    this.openai = new OpenAI({
         apiKey: this.config.apis.openai,
         timeout: 120000, // 2 min
         maxRetries: 5,
@@ -74,22 +74,22 @@ class AudioService {
     this.uploadPath = this.config.upload.dir;
     this.maxFileSize = this._parseFileSize(this.config.upload.maxFileSize);
     this.allowedFormats = this.config.upload.allowedFormats;
-
+    
     // Ensure upload dir
     fs.ensureDirSync(this.uploadPath);
-
+    
     this.logger.info('🎵 AudioService initialized');
-
+    
     // Warmup: verify OpenAI model availability after short delay
     if (this.openai) {
       setTimeout(() => {
-        this._testOpenAIConnection()
+      this._testOpenAIConnection()
           .then(ok => {
             if (ok) this.logger.info('✅ OpenAI API connection verified');
-          })
+        })
           .catch(err => {
             this.logger.warn('⚠️ OpenAI API connection test failed (service may still work):', err?.message);
-          });
+        });
       }, 5000);
     } else {
       this.logger.error('❌ OpenAI API key is missing. Transcription features disabled.');
@@ -171,8 +171,8 @@ class AudioService {
           const res = await this._transcribeSingleFile(segPath, options);
           if (!res.success) {
             throw new Error(`Segment transcription failed: ${res.error}`);
-          }
-
+        }
+        
           // offset segments
           const segs = (res.segments || []).map(s => ({
             ...s,
@@ -236,7 +236,7 @@ class AudioService {
 
       if (!inputAudioPath) throw new Error('Input audio file is required');
 
-      await fs.access(inputAudioPath, fs.constants.R_OK);
+        await fs.access(inputAudioPath, fs.constants.R_OK);
       if (outputAudioPath) await fs.access(outputAudioPath, fs.constants.R_OK);
 
       const [inputStats, outputStats] = await Promise.all([
@@ -476,7 +476,7 @@ class AudioService {
       segments = this._createSegmentsFromText(transcription.text);
     }
 
-    const duration = segments.length > 0
+    const duration = segments.length > 0 
       ? Math.max(...segments.map(s => s.end || 0))
       : this._estimateDurationFromText(transcription.text);
 
@@ -535,7 +535,7 @@ class AudioService {
   _mergeSegmentsByTimestamp(inputSegments, outputSegments, opts = {}) {
     const all = [...(inputSegments || []), ...(outputSegments || [])];
     all.sort((a, b) => (a.start || 0) - (b.start || 0));
-
+    
     const dedup = this._removeDuplicateSegments(all);
     if (!opts.gapPause) return dedup;
 
@@ -568,7 +568,7 @@ class AudioService {
         if (sim > threshold) { dup = true; break; }
       }
       if (!dup) out.push(seg);
-    }
+      }
     return out;
   }
 

@@ -438,6 +438,68 @@ router.get('/openai-status',
 );
 
 /**
+ * GET /api/ai/test-completion
+ * Public endpoint to test OpenAI completion (no auth required)
+ */
+router.get('/test-completion',
+  asyncHandler(async (req, res) => {
+    try {
+      const audioService = require('../services/AudioService');
+      
+      if (!audioService.openai) {
+        return res.status(500).json({
+          success: false,
+          error: 'OpenAI API is not configured',
+          details: {
+            missingApiKey: true,
+            environment: process.env.NODE_ENV
+          }
+        });
+      }
+      
+      // Test with a simple completion
+      const completion = await audioService.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'user',
+            content: 'Say "Hello from Railway!" in a simple response.'
+          }
+        ],
+        max_tokens: 50,
+        temperature: 0.7
+      });
+      
+      const response = completion.choices[0]?.message?.content || 'No response';
+      
+      res.json({
+        success: true,
+        message: 'OpenAI completion test successful',
+        response: response,
+        model: 'gpt-3.5-turbo',
+        environment: process.env.NODE_ENV,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('❌ OpenAI completion test failed:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        environment: process.env.NODE_ENV,
+        timestamp: new Date().toISOString(),
+        details: {
+          type: error.constructor.name,
+          status: error.status,
+          code: error.code,
+          message: error.message,
+          stack: error.stack
+        }
+      });
+    }
+  })
+);
+
+/**
  * GET /api/ai/test-openai
  * Test OpenAI API connectivity specifically
  */
