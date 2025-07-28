@@ -293,6 +293,90 @@ const uploadMicSystemAudio = () => {
 };
 
 /**
+ * Middleware for segmented dual audio upload (multiple files per field)
+ */
+const uploadSegmentedDualAudio = () => {
+  return (req, res, next) => {
+    // Create a multer instance with higher limits for segmented uploads
+    const segmentedUpload = multer({
+      storage,
+      fileFilter: audioFileFilter,
+      limits: {
+        fileSize: parseFileSize(config.upload.maxFileSize),
+        files: 50 // Allow up to 50 files for segmented uploads (25 segments × 2 files each)
+      }
+    });
+
+    const uploadFields = segmentedUpload.fields([
+      { name: 'microphone', maxCount: 25 }, // Allow up to 25 microphone segments
+      { name: 'system', maxCount: 25 }      // Allow up to 25 system segments
+    ]);
+    
+    uploadFields(req, res, (error) => {
+      if (error) {
+        logger.error('❌ Segmented dual audio upload error:', error);
+        
+        if (error instanceof multer.MulterError) {
+          switch (error.code) {
+            case 'LIMIT_FILE_SIZE':
+              return res.status(400).json({
+                success: false,
+                error: `File too large. Maximum size is ${config.upload.maxFileSize}`
+              });
+            case 'LIMIT_FILE_COUNT':
+              return res.status(400).json({
+                success: false,
+                error: 'Too many files uploaded for segmented recording'
+              });
+            default:
+              return res.status(400).json({
+                success: false,
+                error: 'File upload error'
+              });
+          }
+        } else if (error.code === 'INVALID_FILE_TYPE' || error.code === 'INVALID_MIME_TYPE') {
+          return res.status(400).json({
+            success: false,
+            error: error.message
+          });
+        } else {
+          return res.status(500).json({
+            success: false,
+            error: 'Internal server error during file upload'
+          });
+        }
+      }
+
+      // Check if at least one file was uploaded
+      if (!req.files || Object.keys(req.files).length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No audio files uploaded'
+        });
+      }
+
+      // Validate that we have the expected files
+      const { microphone, system } = req.files;
+      
+      if (!microphone || microphone.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'No microphone audio files uploaded'
+        });
+      }
+
+      logger.info('📁 Segmented dual audio files uploaded successfully', {
+        microphoneSegments: microphone.length,
+        systemSegments: system ? system.length : 0,
+        totalFiles: Object.keys(req.files).reduce((sum, key) => sum + req.files[key].length, 0)
+      });
+
+      next();
+    });
+  };
+};
+
+/**
  * Cleanup uploaded files (for error cases)
  * @param {Array} files - Array of file objects to cleanup
  */
@@ -336,6 +420,7 @@ module.exports = {
   uploadSingleAudio,
   uploadDualAudio,
   uploadMicSystemAudio,
+  uploadSegmentedDualAudio,
   cleanupFiles,
   handleUploadError
 }; 
