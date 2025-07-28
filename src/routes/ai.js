@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 const { requireDatabase } = require('../middleware/databaseCheck');
 const { asyncHandler } = require('../middleware/errorHandler');
 const aiService = require('../services/AIService');
