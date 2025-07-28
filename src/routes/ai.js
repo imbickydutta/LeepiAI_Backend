@@ -393,6 +393,52 @@ router.get('/status',
 );
 
 /**
+ * GET /api/ai/openai-status
+ * Public endpoint to check OpenAI API status (no auth required)
+ */
+router.get('/openai-status',
+  asyncHandler(async (req, res) => {
+    try {
+      const AudioService = require('../services/AudioService');
+      const audioService = new AudioService();
+      
+      if (!audioService.openai) {
+        return res.status(500).json({
+          success: false,
+          error: 'OpenAI API is not configured',
+          details: {
+            missingApiKey: true,
+            environment: process.env.NODE_ENV
+          }
+        });
+      }
+      
+      const result = await audioService._testOpenAIConnection();
+      res.json({
+        success: true,
+        message: 'OpenAI API connection successful',
+        environment: process.env.NODE_ENV,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('❌ OpenAI API public test failed:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        environment: process.env.NODE_ENV,
+        timestamp: new Date().toISOString(),
+        details: {
+          type: error.constructor.name,
+          status: error.status,
+          code: error.code,
+          message: error.message
+        }
+      });
+    }
+  })
+);
+
+/**
  * GET /api/ai/test-openai
  * Test OpenAI API connectivity specifically
  */
