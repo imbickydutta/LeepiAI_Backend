@@ -399,8 +399,7 @@ router.get('/status',
 router.get('/openai-status',
   asyncHandler(async (req, res) => {
     try {
-      const AudioService = require('../services/AudioService');
-      const audioService = new AudioService();
+      const audioService = require('../services/AudioService');
       
       if (!audioService.openai) {
         return res.status(500).json({
@@ -446,8 +445,7 @@ router.get('/test-openai',
   authenticate,
   asyncHandler(async (req, res) => {
     try {
-      const AudioService = require('../services/AudioService');
-      const audioService = new AudioService();
+      const audioService = require('../services/AudioService');
       
       if (!audioService.openai) {
         return res.status(500).json({
