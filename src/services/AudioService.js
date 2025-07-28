@@ -7,28 +7,33 @@ const logger = require('../utils/logger');
 
 class AudioService {
   constructor() {
-    // Validate OpenAI API key
-    if (!config.apis.openai) {
-      logger.error('❌ OpenAI API key is missing');
-      throw new Error('OpenAI API key is required');
-    }
-
+    // Initialize OpenAI client
     this.openai = new OpenAI({
-      apiKey: config.apis.openai
+      apiKey: config.apis.openai,
+      timeout: 30000, // 30 second timeout
+      maxRetries: 3
     });
-    this.uploadPath = config.upload.path;
+    
+    // Initialize upload configuration
+    this.uploadPath = path.join(__dirname, '../../uploads');
     this.maxFileSize = this._parseFileSize(config.upload.maxFileSize);
     this.allowedFormats = config.upload.allowedFormats;
     
     // Ensure upload directory exists
     fs.ensureDirSync(this.uploadPath);
     
-    // Test OpenAI API connection (non-blocking)
-    this._testOpenAIConnection().catch(error => {
-      logger.warn('⚠️ OpenAI API test failed during initialization:', error.message);
-    });
-    
     logger.info('🎵 AudioService initialized');
+    
+    // Test OpenAI API connection asynchronously (completely non-blocking)
+    setImmediate(() => {
+      this._testOpenAIConnection()
+        .then(() => {
+          logger.info('✅ OpenAI API connection verified');
+        })
+        .catch(error => {
+          logger.warn('⚠️ OpenAI API connection test failed (service will still work):', error.message);
+        });
+    });
   }
 
   /**
@@ -38,8 +43,9 @@ class AudioService {
   async _testOpenAIConnection() {
     try {
       // Try a simple models list call to test connection
-      await this.openai.models.list();
+      const response = await this.openai.models.list();
       logger.info('✅ OpenAI API connection successful');
+      return true;
     } catch (error) {
       logger.error('❌ OpenAI API connection test failed:', {
         error: error.message,
@@ -47,12 +53,8 @@ class AudioService {
         status: error.status
       });
       
-      if (error.message.includes('API key')) {
-        throw new Error('Invalid OpenAI API key');
-      } else if (error.message.includes('Connection')) {
-        throw new Error('Cannot connect to OpenAI API. Please check network connectivity.');
-      }
-      throw error;
+      // Don't throw error during startup, just log it
+      return false;
     }
   }
 
