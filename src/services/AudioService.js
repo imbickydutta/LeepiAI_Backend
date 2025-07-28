@@ -149,16 +149,75 @@ class AudioService {
    */
   async transcribeDualAudio(inputAudioPath, outputAudioPath) {
     try {
-      logger.info('🔄 Starting dual audio transcription');
+      logger.info('🔄 Starting dual audio transcription', {
+        hasInputAudio: !!inputAudioPath,
+        hasOutputAudio: !!outputAudioPath
+      });
 
-      // Transcribe both streams in parallel
-      const [inputResult, outputResult] = await Promise.all([
-        this.transcribeAudio(inputAudioPath),
-        this.transcribeAudio(outputAudioPath)
+      // Validate input file
+      if (!inputAudioPath) {
+        throw new Error('Input audio file is required');
+      }
+
+      // Check if files exist and are readable
+      try {
+        await fs.access(inputAudioPath, fs.constants.R_OK);
+        if (outputAudioPath) {
+          await fs.access(outputAudioPath, fs.constants.R_OK);
+        }
+      } catch (error) {
+        logger.error('❌ Audio file access error:', {
+          error: error.message,
+          inputPath: inputAudioPath,
+          outputPath: outputAudioPath
+        });
+        throw new Error(`Audio file not accessible: ${error.message}`);
+      }
+
+      // Get file stats for logging
+      const [inputStats, outputStats] = await Promise.all([
+        fs.stat(inputAudioPath),
+        outputAudioPath ? fs.stat(outputAudioPath) : null
       ]);
 
-      if (!inputResult.success || !outputResult.success) {
-        throw new Error('Failed to transcribe one or both audio streams');
+      logger.info('📊 Audio file stats:', {
+        input: {
+          size: inputStats.size,
+          created: inputStats.birthtime,
+          modified: inputStats.mtime
+        },
+        output: outputStats ? {
+          size: outputStats.size,
+          created: outputStats.birthtime,
+          modified: outputStats.mtime
+        } : null
+      });
+
+      // Transcribe both streams in parallel
+      logger.info('🎯 Starting transcription process');
+      
+      const transcriptionPromises = [this.transcribeAudio(inputAudioPath)];
+      if (outputAudioPath) {
+        transcriptionPromises.push(this.transcribeAudio(outputAudioPath));
+      }
+
+      const results = await Promise.all(transcriptionPromises);
+      const [inputResult, outputResult] = results;
+
+      if (!inputResult.success) {
+        logger.error('❌ Input audio transcription failed:', {
+          error: inputResult.error,
+          path: inputAudioPath
+        });
+        throw new Error(`Input audio transcription failed: ${inputResult.error}`);
+      }
+
+      if (outputAudioPath && (!outputResult || !outputResult.success)) {
+        logger.error('❌ Output audio transcription failed:', {
+          error: outputResult?.error,
+          path: outputAudioPath
+        });
+        throw new Error(`Output audio transcription failed: ${outputResult?.error}`);
       }
 
       // Tag segments with source
@@ -167,10 +226,13 @@ class AudioService {
         source: 'input'
       }));
 
-      const outputSegments = outputResult.segments.map(segment => ({
-        ...segment,
-        source: 'output'
-      }));
+      let outputSegments = [];
+      if (outputResult && outputResult.success) {
+        outputSegments = outputResult.segments.map(segment => ({
+          ...segment,
+          source: 'output'
+        }));
+      }
 
       // Merge segments by timestamp
       const mergedSegments = this._mergeSegmentsByTimestamp(inputSegments, outputSegments);
@@ -178,7 +240,8 @@ class AudioService {
       logger.info('✅ Dual transcription completed', {
         inputSegments: inputSegments.length,
         outputSegments: outputSegments.length,
-        mergedSegments: mergedSegments.length
+        mergedSegments: mergedSegments.length,
+        totalDuration: Math.max(inputResult.duration || 0, outputResult?.duration || 0)
       });
 
       return {
@@ -187,14 +250,26 @@ class AudioService {
         outputSegments,
         mergedSegments,
         inputText: inputResult.text,
-        outputText: outputResult.text,
-        totalDuration: Math.max(inputResult.duration || 0, outputResult.duration || 0)
+        outputText: outputResult?.text,
+        totalDuration: Math.max(inputResult.duration || 0, outputResult?.duration || 0)
       };
+
     } catch (error) {
-      logger.error('❌ Dual transcription failed:', error);
+      logger.error('❌ Dual transcription failed:', {
+        error: error.message,
+        stack: error.stack,
+        inputPath: inputAudioPath,
+        outputPath: outputAudioPath
+      });
+
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        details: process.env.NODE_ENV === 'development' ? {
+          stack: error.stack,
+          inputPath: inputAudioPath,
+          outputPath: outputAudioPath
+        } : undefined
       };
     }
   }

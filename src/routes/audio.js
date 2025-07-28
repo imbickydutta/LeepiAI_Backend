@@ -95,17 +95,54 @@ router.post('/upload-dual',
     try {
       const { microphone, system } = req.files;
 
+      // Log received files
+      logger.info('📥 Received dual audio upload request', {
+        hasMicrophone: !!microphone,
+        hasSystem: !!system,
+        microphoneSize: microphone?.[0]?.size,
+        systemSize: system?.[0]?.size,
+        userId: req.user.id
+      });
+
+      // Validate files
+      if (!microphone || !microphone[0]) {
+        throw new Error('Microphone audio file is required');
+      }
+
       // Collect files for cleanup
       if (microphone) filesToCleanup.push(microphone[0]);
       if (system) filesToCleanup.push(system[0]);
 
-      // Process dual audio (map to expected parameter names)
+      // Log file details before processing
+      logger.info('🎤 Processing audio files', {
+        microphone: {
+          name: microphone[0].originalname,
+          size: microphone[0].size,
+          mimetype: microphone[0].mimetype,
+          path: microphone[0].path
+        },
+        system: system?.[0] ? {
+          name: system[0].originalname,
+          size: system[0].size,
+          mimetype: system[0].mimetype,
+          path: system[0].path
+        } : null
+      });
+
+      // Process dual audio
       const transcriptionResult = await audioService.transcribeDualAudio(
-        microphone ? microphone[0].path : null,
-        system ? system[0].path : null
+        microphone[0].path,
+        system?.[0]?.path || null
       );
 
       if (!transcriptionResult.success) {
+        logger.error('❌ Transcription failed:', {
+          error: transcriptionResult.error,
+          userId: req.user.id,
+          microphonePath: microphone[0].path,
+          systemPath: system?.[0]?.path
+        });
+
         await cleanupFiles(filesToCleanup);
         return res.status(400).json({
           success: false,
@@ -148,7 +185,7 @@ router.post('/upload-dual',
       // Clean up temporary files
       await cleanupFiles(filesToCleanup);
 
-      logger.info('🎵 Dual audio (mic/system) processed successfully', {
+      logger.info('🎵 Dual audio processed successfully', {
         userId: req.user.id,
         transcriptId: savedTranscript.id,
         duration: transcriptionResult.totalDuration,
@@ -160,22 +197,24 @@ router.post('/upload-dual',
       res.json({
         success: true,
         message: 'Dual audio processed successfully',
-        transcript: savedTranscript,
-        details: {
-          inputSegments: transcriptionResult.inputSegments.length,
-          outputSegments: transcriptionResult.outputSegments.length,
-          mergedSegments: transcriptionResult.mergedSegments.length,
-          totalDuration: transcriptionResult.totalDuration,
-          sources: {
-            microphone: !!microphone,
-            system: !!system
-          }
-        }
+        transcript: savedTranscript
       });
 
     } catch (error) {
+      logger.error('❌ Dual audio processing failed:', {
+        error: error.message,
+        stack: error.stack,
+        userId: req.user.id,
+        files: req.files
+      });
+
       await cleanupFiles(filesToCleanup);
-      throw error;
+      
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
     }
   })
 );
