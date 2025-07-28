@@ -119,6 +119,8 @@ class AudioService {
    * @returns {Promise<Object>} Transcription result
    */
   async transcribeAudio(audioFilePath, options = {}) {
+    let fileStats = null;
+    
     try {
       const {
         language = 'en',
@@ -132,7 +134,7 @@ class AudioService {
         throw new Error('Audio file not found');
       }
 
-      const fileStats = await fs.stat(audioFilePath);
+      fileStats = await fs.stat(audioFilePath);
       const fileSizeMB = fileStats.size / (1024 * 1024);
       
       logger.info(`🔄 Starting Whisper transcription for ${fileSizeMB.toFixed(2)}MB file`);
@@ -196,7 +198,7 @@ class AudioService {
       logger.error('❌ Transcription process failed:', {
         error: error.message,
         file: audioFilePath,
-        size: fileStats?.size
+        size: fileStats?.size || 'unknown'
       });
       return {
         success: false,
