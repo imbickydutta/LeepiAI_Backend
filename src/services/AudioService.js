@@ -23,8 +23,10 @@ class AudioService {
     // Ensure upload directory exists
     fs.ensureDirSync(this.uploadPath);
     
-    // Test OpenAI API connection
-    this._testOpenAIConnection();
+    // Test OpenAI API connection (non-blocking)
+    this._testOpenAIConnection().catch(error => {
+      logger.warn('⚠️ OpenAI API test failed during initialization:', error.message);
+    });
     
     logger.info('🎵 AudioService initialized');
   }

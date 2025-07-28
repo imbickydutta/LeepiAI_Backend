@@ -26,7 +26,8 @@ class Database {
       retry: this.currentRetry + 1,
       maxRetries: this.maxRetries,
       environment: process.env.NODE_ENV,
-      uri: config.mongodbUri ? config.mongodbUri.split('@')[0] + '@[HIDDEN]' : 'undefined'
+      uri: config.mongodbUri ? config.mongodbUri.substring(0, 20) + '...[HIDDEN]' : 'undefined',
+      uriLength: config.mongodbUri ? config.mongodbUri.length : 0
     });
 
     try {
