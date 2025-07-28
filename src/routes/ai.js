@@ -457,17 +457,17 @@ router.get('/test-completion',
         });
       }
       
-      // Test with a simple completion
+      // Test with a simple completion using different model
       const completion = await audioService.openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'user',
-            content: 'Say "Hello from Railway!" in a simple response.'
+            content: 'Hi'
           }
         ],
-        max_tokens: 50,
-        temperature: 0.7
+        max_tokens: 10,
+        temperature: 0
       });
       
       const response = completion.choices[0]?.message?.content || 'No response';
