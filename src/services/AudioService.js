@@ -11,14 +11,7 @@ const { spawn } = require('child_process');
 const config = require('../config/env');
 const logger = require('../utils/logger');
 
-// Force IPv4 for Railway environment - alternative approach
-try {
-  const { setGlobalDispatcher, Agent } = require('undici');
-  setGlobalDispatcher(new Agent({ connect: { family: 4 }}));
-  logger.info('✅ Undici IPv4 dispatcher configured');
-} catch (error) {
-  logger.warn('⚠️ Could not configure Undici IPv4 dispatcher:', error.message);
-}
+
 
 class AudioService {
   constructor(userConfig = {}) {
@@ -66,15 +59,10 @@ class AudioService {
       this.logger.error('❌ OpenAI API key is missing. Audio transcription will not work.');
       this.openai = null;
         } else {
-      // Force IPv4 for Railway environment
-      process.env.NODE_OPTIONS = [process.env.NODE_OPTIONS, '--dns-result-order=ipv4first'].filter(Boolean).join(' ');
-      
-      // Disable custom agent to rule out keep-alive/DNS issues
       this.openai = new OpenAI({
         apiKey: this.config.apis.openai,
         timeout: 120000, // 2 min
         maxRetries: 5
-        // Removed httpAgent to test if it's causing the issue
       });
     }
 
