@@ -26,8 +26,8 @@ class Database {
       retry: this.currentRetry + 1,
       maxRetries: this.maxRetries,
       environment: process.env.NODE_ENV,
-      uri: config.mongodbUri ? config.mongodbUri.substring(0, 20) + '...[HIDDEN]' : 'undefined',
-      uriLength: config.mongodbUri ? config.mongodbUri.length : 0
+      uri: config.database.uri ? config.database.uri.substring(0, 20) + '...[HIDDEN]' : 'undefined',
+      uriLength: config.database.uri ? config.database.uri.length : 0
     });
 
     try {
@@ -38,7 +38,7 @@ class Database {
       }
 
       // Connect to MongoDB
-      await mongoose.connect(config.mongodbUri, options);
+      await mongoose.connect(config.database.uri, options);
       
       this.isConnected = true;
       this.currentRetry = 0;
