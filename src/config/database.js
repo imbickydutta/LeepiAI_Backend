@@ -21,6 +21,16 @@ class Database {
       autoIndex: process.env.NODE_ENV !== 'production'
     };
 
+    // Debug environment variables
+    logger.info('🔍 Environment Debug:', {
+      NODE_ENV: process.env.NODE_ENV,
+      MONGODB_URI_exists: !!process.env.MONGODB_URI,
+      MONGODB_URI_PROD_exists: !!process.env.MONGODB_URI_PROD,
+      configType: typeof config,
+      configDatabaseExists: !!config.database,
+      configDatabaseUri: config.database ? !!config.database.uri : 'config.database is undefined'
+    });
+
     // Log connection attempt
     logger.info('📡 Attempting database connection...', {
       retry: this.currentRetry + 1,
@@ -29,6 +39,16 @@ class Database {
       uri: config.database.uri ? config.database.uri.substring(0, 20) + '...[HIDDEN]' : 'undefined',
       uriLength: config.database.uri ? config.database.uri.length : 0
     });
+
+    // Check if URI is missing
+    if (!config.database.uri) {
+      const error = new Error('Database URI is not configured. Please check environment variables.');
+      logger.error('❌ Database URI missing:', {
+        NODE_ENV: process.env.NODE_ENV,
+        expectedVariable: process.env.NODE_ENV === 'production' ? 'MONGODB_URI_PROD' : 'MONGODB_URI'
+      });
+      throw error;
+    }
 
     try {
       // Clear any existing connections
@@ -102,13 +122,16 @@ class Database {
       99: 'uninitialized'
     };
 
-    logger.info('📊 Database connection state:', {
-      state: stateMap[state],
+    const connectionInfo = {
+      state: stateMap[state] || 'unknown',
       readyState: state,
-      name: mongoose.connection.name,
-      host: mongoose.connection.host,
-      port: mongoose.connection.port
-    });
+      name: mongoose.connection.name || 'undefined',
+      host: mongoose.connection.host || 'undefined',
+      port: mongoose.connection.port || 'undefined',
+      isConnected: state === 1
+    };
+
+    logger.info('📊 Database connection state:', connectionInfo);
 
     return state === 1;
   }
