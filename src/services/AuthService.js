@@ -202,17 +202,36 @@ class AuthService {
    */
   async verifyToken(token) {
     try {
+      logger.info('🔍 Token verification started:', {
+        tokenLength: token ? token.length : 0,
+        jwtSecretLength: this.jwtSecret ? this.jwtSecret.length : 0,
+        tokenStart: token ? token.substring(0, 10) + '...' : 'undefined'
+      });
+
       // Verify JWT signature and expiration
       const decoded = jwt.verify(token, this.jwtSecret);
+      
+      logger.info('✅ JWT signature verified:', {
+        userId: decoded.userId,
+        exp: decoded.exp,
+        iat: decoded.iat
+      });
 
       // Find active session
       const session = await Session.findByToken(token);
       if (!session) {
+        logger.warn('❌ Session not found for token');
         return {
           valid: false,
           error: 'Session not found or expired'
         };
       }
+
+      logger.info('✅ Session found:', {
+        sessionId: session.id,
+        isActive: session.isActive,
+        expiresAt: session.expiresAt
+      });
 
       // Update session last used time
       await session.updateLastUsed();
@@ -220,11 +239,21 @@ class AuthService {
       // Get user
       const user = await User.findByCustomId(decoded.userId);
       if (!user || !user.isActive) {
+        logger.warn('❌ User not found or inactive:', {
+          userId: decoded.userId,
+          userExists: !!user,
+          userActive: user ? user.isActive : 'N/A'
+        });
         return {
           valid: false,
           error: 'User not found or inactive'
         };
       }
+
+      logger.info('✅ Token verification successful:', {
+        userId: user.id,
+        email: user.email
+      });
 
       return {
         valid: true,
@@ -232,6 +261,13 @@ class AuthService {
         session: session
       };
     } catch (error) {
+      logger.error('❌ Token verification error details:', {
+        errorName: error.name,
+        errorMessage: error.message,
+        tokenLength: token ? token.length : 0,
+        jwtSecretExists: !!this.jwtSecret
+      });
+
       if (error.name === 'TokenExpiredError') {
         return {
           valid: false,
