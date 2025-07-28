@@ -86,14 +86,24 @@ indexes.forEach(index => {
   userSchema.index(index.fields, index.options);
 });
 
+// Flag to prevent multiple index creation calls
+let indexesCreated = false;
+
 // Static method to ensure indexes exist
 userSchema.statics.ensureIndexes = async function() {
+  // Prevent multiple calls
+  if (indexesCreated) {
+    logger.debug('📊 User indexes already created, skipping...');
+    return true;
+  }
+
   try {
     logger.info('🔍 Creating User model indexes...');
 
     // Wait for connection to be ready
     if (mongoose.connection.readyState !== 1) {
-      throw new Error('Database connection not ready');
+      logger.warn('⚠️ Database connection not ready, skipping index creation');
+      return false;
     }
 
     // Get existing indexes
@@ -108,21 +118,18 @@ userSchema.statics.ensureIndexes = async function() {
       }))
     );
     
-    // Force recreate indexes
-    await this.syncIndexes();
+    // Only create indexes if they don't exist
+    if (existingIndexes.length <= 1) { // Only _id index exists
+      logger.info('🔄 Creating missing indexes...');
+      await this.syncIndexes();
+    } else {
+      logger.info('✅ Indexes already exist, skipping creation');
+    }
     
-    // Get updated indexes
-    const updatedIndexes = await mongoose.connection.db
-      .collection('users')
-      .indexes();
-
-    logger.info('✅ User model indexes created successfully:', 
-      updatedIndexes.map(idx => ({
-        name: idx.name,
-        key: idx.key
-      }))
-    );
+    // Mark as completed
+    indexesCreated = true;
     
+    logger.info('✅ User model indexes ready');
     return true;
   } catch (error) {
     logger.error('❌ Failed to create User model indexes:', {
@@ -167,6 +174,19 @@ userSchema.methods.getPublicProfile = function() {
     lastLoginAt: this.lastLoginAt,
     createdAt: this.createdAt
   };
+};
+
+// Static method to find user by custom ID
+userSchema.statics.findByCustomId = async function(customId) {
+  try {
+    return await this.findOne({ id: customId });
+  } catch (error) {
+    logger.error('❌ Error finding user by custom ID:', {
+      customId,
+      error: error.message
+    });
+    throw error;
+  }
 };
 
 const User = mongoose.model('User', userSchema);

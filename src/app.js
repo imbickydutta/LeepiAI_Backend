@@ -189,15 +189,35 @@ const startServer = async () => {
           const Session = require('./models/Session');
           const Settings = require('./models/Settings');
 
-          // Create indexes if needed (non-blocking)
-          Promise.all([
-            User.ensureIndexes(),
-            Session.ensureIndexes(),
-            Settings.ensureIndexes()
-          ]).then(() => {
-            logger.info('✅ Database indexes verified');
-          }).catch(error => {
-            logger.warn('⚠️ Index verification failed (non-critical):', error.message);
+          // Create indexes if needed (non-blocking, with individual error handling)
+          const createIndexes = async () => {
+            try {
+              await User.ensureIndexes();
+              logger.info('✅ User indexes verified');
+            } catch (error) {
+              logger.warn('⚠️ User index verification failed:', error.message);
+            }
+            
+            try {
+              await Session.ensureIndexes();
+              logger.info('✅ Session indexes verified');
+            } catch (error) {
+              logger.warn('⚠️ Session index verification failed:', error.message);
+            }
+            
+            try {
+              await Settings.ensureIndexes();
+              logger.info('✅ Settings indexes verified');
+            } catch (error) {
+              logger.warn('⚠️ Settings index verification failed:', error.message);
+            }
+            
+            logger.info('✅ Database indexes verification completed');
+          };
+          
+          // Run index creation asynchronously
+          createIndexes().catch(error => {
+            logger.warn('⚠️ Index creation process failed:', error.message);
           });
         } else {
           logger.warn('⚠️ Database connection failed, but server is running');
