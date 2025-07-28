@@ -103,47 +103,6 @@ router.get('/search',
 );
 
 /**
- * POST /api/transcripts
- * Create a new transcript
- */
-router.post('/',
-  authenticate,
-  requireDatabase,
-  [
-    body('title').optional().trim().isLength({ min: 1, max: 200 }).withMessage('Title must be 1-200 characters'),
-    body('content').optional().trim().isLength({ min: 1 }).withMessage('Content cannot be empty'),
-    body('segments').optional().isArray().withMessage('Segments must be an array'),
-    body('metadata').optional().isObject().withMessage('Metadata must be an object')
-  ],
-  handleValidationErrors,
-  asyncHandler(async (req, res) => {
-    const { title, content, segments, metadata } = req.body;
-
-    const transcriptData = {
-      userId: req.user.id,
-      title: title || 'New Transcript',
-      content: content || '',
-      segments: segments || [],
-      metadata: metadata || {}
-    };
-
-    const savedTranscript = await databaseService.saveTranscript(transcriptData);
-
-    logger.info('📝 Transcript created via API', {
-      transcriptId: savedTranscript.id,
-      userId: req.user.id,
-      title: savedTranscript.title
-    });
-
-    res.json({
-      success: true,
-      message: 'Transcript created successfully',
-      transcript: savedTranscript
-    });
-  })
-);
-
-/**
  * GET /api/transcripts/:id
  * Get specific transcript
  */
