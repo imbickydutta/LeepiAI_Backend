@@ -4,29 +4,24 @@ const { v4: uuidv4 } = require('uuid');
 const sessionSchema = new mongoose.Schema({
   id: {
     type: String,
-    index: true,
     default: uuidv4
   },
   userId: {
     type: String,
     required: [true, 'User ID is required'],
-    ref: 'User',
-    index: true
+    ref: 'User'
   },
   token: {
     type: String,
-    required: [true, 'Token is required'],
-    index: true
+    required: [true, 'Token is required']
   },
   refreshToken: {
     type: String,
-    required: [true, 'Refresh token is required'],
-    index: true
+    required: [true, 'Refresh token is required']
   },
   expiresAt: {
     type: Date,
-    required: [true, 'Expiration date is required'],
-    index: true
+    required: [true, 'Expiration date is required']
   },
   refreshExpiresAt: {
     type: Date,
@@ -39,8 +34,7 @@ const sessionSchema = new mongoose.Schema({
   },
   isActive: {
     type: Boolean,
-    default: true,
-    index: true
+    default: true
   },
   lastUsedAt: {
     type: Date,

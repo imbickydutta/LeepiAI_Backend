@@ -5,13 +5,11 @@ const { v4: uuidv4 } = require('uuid');
 const userSchema = new mongoose.Schema({
   id: {
     type: String,
-    index: true,
     default: uuidv4
   },
   email: {
     type: String,
     required: [true, 'Email is required'],
-    index: true,
     lowercase: true,
     trim: true,
     match: [/^\S+@\S+\.\S+$/, 'Please enter a valid email']
