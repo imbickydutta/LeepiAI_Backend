@@ -128,6 +128,46 @@ const requirePermissions = (permissions) => {
 };
 
 /**
+ * Middleware to check if user is an admin
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Next middleware function
+ */
+const requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    logger.warn('❌ Admin access denied: No user in request', {
+      path: req.path,
+      method: req.method
+    });
+    return res.status(401).json({
+      success: false,
+      error: 'Authentication required'
+    });
+  }
+
+  if (req.user.role !== 'admin') {
+    logger.warn('❌ Admin access denied: Insufficient permissions', {
+      userId: req.user.id,
+      userRole: req.user.role,
+      path: req.path,
+      method: req.method
+    });
+    return res.status(403).json({
+      success: false,
+      error: 'Admin access required'
+    });
+  }
+
+  logger.info('✅ Admin access granted', {
+    adminId: req.user.id,
+    path: req.path,
+    method: req.method
+  });
+
+  next();
+};
+
+/**
  * Middleware to check if user is active
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
@@ -155,5 +195,6 @@ module.exports = {
   authenticate,
   optionalAuth,
   requirePermissions,
+  requireAdmin,
   requireActiveUser
 }; 

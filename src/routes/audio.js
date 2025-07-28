@@ -1,5 +1,6 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
+const { requireDatabase } = require('../middleware/databaseCheck');
 const { uploadSingleAudio, uploadDualAudio, uploadMicSystemAudio, cleanupFiles } = require('../middleware/upload');
 const { asyncHandler } = require('../middleware/errorHandler');
 const audioService = require('../services/AudioService');
@@ -14,6 +15,7 @@ const router = express.Router();
  */
 router.post('/upload',
   authenticate,
+  requireDatabase,
   uploadSingleAudio('audio'),
   asyncHandler(async (req, res) => {
     const filesToCleanup = [req.file];
@@ -88,6 +90,7 @@ router.post('/upload',
  */
 router.post('/upload-dual',
   authenticate,
+  requireDatabase,
   uploadMicSystemAudio(),
   asyncHandler(async (req, res) => {
     const filesToCleanup = [];
@@ -225,6 +228,7 @@ router.post('/upload-dual',
  */
 router.post('/transcribe',
   authenticate,
+  requireDatabase,
   uploadSingleAudio('audio'),
   asyncHandler(async (req, res) => {
     const filesToCleanup = [req.file];

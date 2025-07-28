@@ -1,25 +1,13 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
+const { requireDatabase } = require('../middleware/databaseCheck');
 const { asyncHandler } = require('../middleware/errorHandler');
 const databaseService = require('../services/DatabaseService');
 const authService = require('../services/AuthService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
-
-/**
- * Middleware to check if user is an admin
- */
-const requireAdmin = async (req, res, next) => {
-  if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({
-      success: false,
-      error: 'Admin access required'
-    });
-  }
-  next();
-};
 
 /**
  * Validation middleware
@@ -45,6 +33,7 @@ const handleValidationErrors = (req, res, next) => {
  */
 router.get('/profile',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const user = await databaseService.getUserById(req.user.id);
     
@@ -68,6 +57,7 @@ router.get('/profile',
  */
 router.put('/profile',
   authenticate,
+  requireDatabase,
   [
     body('firstName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('First name must be 1-50 characters'),
     body('lastName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Last name must be 1-50 characters'),
@@ -378,6 +368,7 @@ router.get('/export',
 router.get('/',
   authenticate,
   requireAdmin,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     try {
       logger.info('📋 Getting all users list', { adminId: req.user.id });
@@ -411,6 +402,7 @@ router.get('/',
 router.delete('/:userId',
   authenticate,
   requireAdmin,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { userId } = req.params;
     

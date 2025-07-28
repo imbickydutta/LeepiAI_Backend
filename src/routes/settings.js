@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
+const { requireDatabase } = require('../middleware/databaseCheck');
 const { asyncHandler } = require('../middleware/errorHandler');
 const databaseService = require('../services/DatabaseService');
 const logger = require('../utils/logger');
@@ -8,21 +9,38 @@ const logger = require('../utils/logger');
 const router = express.Router();
 
 /**
+ * Validation middleware
+ */
+const handleValidationErrors = (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      error: 'Validation failed',
+      details: errors.array().map(err => ({
+        field: err.path,
+        message: err.msg
+      }))
+    });
+  }
+  next();
+};
+
+/**
  * GET /api/settings
  * Get all system settings (admin only)
  */
 router.get('/',
   authenticate,
+  requireAdmin,
+  requireDatabase,
   asyncHandler(async (req, res) => {
-    // Check if user is admin
-    if (!req.user || req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required'
-      });
-    }
-
     const settings = await databaseService.getSystemSettings();
+    
+    logger.info('⚙️ System settings retrieved', {
+      adminId: req.user.id,
+      settingsCount: settings.length
+    });
     
     res.json({
       success: true,
@@ -37,28 +55,14 @@ router.get('/',
  */
 router.put('/',
   authenticate,
+  requireAdmin,
+  requireDatabase,
   [
     body('key').notEmpty().withMessage('Setting key is required'),
     body('value').exists().withMessage('Setting value is required')
   ],
+  handleValidationErrors,
   asyncHandler(async (req, res) => {
-    // Check if user is admin
-    if (!req.user || req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Admin access required'
-      });
-    }
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: errors.array()
-      });
-    }
-
     const { key, value } = req.body;
     
     const result = await databaseService.updateSystemSetting(key, value, req.user.id);

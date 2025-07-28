@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { authenticate } = require('../middleware/auth');
+const { requireDatabase } = require('../middleware/databaseCheck');
 const { asyncHandler } = require('../middleware/errorHandler');
 const aiService = require('../services/AIService');
 const databaseService = require('../services/DatabaseService');
@@ -32,6 +33,7 @@ const handleValidationErrors = (req, res, next) => {
  */
 router.post('/summary/:transcriptId',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
@@ -84,6 +86,7 @@ router.post('/summary/:transcriptId',
  */
 router.post('/debrief/:transcriptId',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
@@ -136,6 +139,7 @@ router.post('/debrief/:transcriptId',
  */
 router.post('/chat/:transcriptId',
   authenticate,
+  requireDatabase,
   [
     body('message').trim().isLength({ min: 1, max: 2000 }).withMessage('Message must be 1-2000 characters'),
     body('saveToHistory').optional().isBoolean().withMessage('saveToHistory must be boolean')
@@ -194,6 +198,7 @@ router.post('/chat/:transcriptId',
  */
 router.get('/chat/:transcriptId/history',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
@@ -213,6 +218,7 @@ router.get('/chat/:transcriptId/history',
  */
 router.delete('/chat/:transcriptId/history',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
@@ -236,6 +242,7 @@ router.delete('/chat/:transcriptId/history',
  */
 router.post('/extract-qa/:transcriptId',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
@@ -266,6 +273,7 @@ router.post('/extract-qa/:transcriptId',
  */
 router.post('/follow-up-questions/:transcriptId',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
@@ -296,6 +304,7 @@ router.post('/follow-up-questions/:transcriptId',
  */
 router.post('/analyze/:transcriptId',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     

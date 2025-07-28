@@ -189,6 +189,7 @@ router.post('/refresh',
  */
 router.post('/logout',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const result = await authService.logout(req.token);
 
@@ -214,6 +215,7 @@ router.post('/logout',
  */
 router.get('/me',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     res.json({
       success: true,
@@ -228,6 +230,7 @@ router.get('/me',
  */
 router.get('/sessions',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const sessions = await authService.getUserSessions(req.user.id);
 
@@ -244,6 +247,7 @@ router.get('/sessions',
  */
 router.delete('/sessions',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const result = await authService.terminateAllSessions(req.user.id);
 

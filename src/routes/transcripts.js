@@ -78,6 +78,7 @@ router.get('/',
  */
 router.get('/search',
   authenticate,
+  requireDatabase,
   [
     query('q').notEmpty().withMessage('Search query is required'),
     query('limit').optional().isInt({ min: 1, max: 50 }).withMessage('Limit must be between 1 and 50'),
@@ -107,6 +108,7 @@ router.get('/search',
  */
 router.get('/:id',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     
@@ -125,6 +127,7 @@ router.get('/:id',
  */
 router.put('/:id',
   authenticate,
+  requireDatabase,
   [
     body('title').optional().trim().isLength({ min: 1, max: 200 }).withMessage('Title must be 1-200 characters'),
     body('content').optional().trim().isLength({ min: 1 }).withMessage('Content cannot be empty'),
@@ -164,6 +167,7 @@ router.put('/:id',
  */
 router.delete('/:id',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     
@@ -187,6 +191,7 @@ router.delete('/:id',
  */
 router.get('/:id/stats',
   authenticate,
+  requireDatabase,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     
@@ -220,6 +225,7 @@ router.get('/:id/stats',
  */
 router.post('/:id/export',
   authenticate,
+  requireDatabase,
   [
     body('format').isIn(['txt', 'json', 'md']).withMessage('Format must be txt, json, or md'),
     body('includeAnalysis').optional().isBoolean().withMessage('includeAnalysis must be boolean')
@@ -298,6 +304,7 @@ router.post('/:id/export',
  */
 router.post('/bulk-delete',
   authenticate,
+  requireDatabase,
   [
     body('transcriptIds').isArray({ min: 1 }).withMessage('Must provide array of transcript IDs'),
     body('transcriptIds.*').isString().withMessage('Each transcript ID must be a string')
