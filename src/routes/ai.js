@@ -392,4 +392,47 @@ router.get('/status',
   })
 );
 
+/**
+ * GET /api/ai/test-openai
+ * Test OpenAI API connectivity specifically
+ */
+router.get('/test-openai',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    try {
+      const AudioService = require('../services/AudioService');
+      const audioService = new AudioService();
+      
+      if (!audioService.openai) {
+        return res.status(500).json({
+          success: false,
+          error: 'OpenAI API is not configured',
+          details: {
+            missingApiKey: true
+          }
+        });
+      }
+      
+      const result = await audioService._testOpenAIConnection();
+      res.json({
+        success: true,
+        message: 'OpenAI API connection successful',
+        result
+      });
+    } catch (error) {
+      logger.error('❌ OpenAI API test failed:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message,
+        details: {
+          type: error.constructor.name,
+          status: error.status,
+          code: error.code,
+          message: error.message
+        }
+      });
+    }
+  })
+);
+
 module.exports = router; 
