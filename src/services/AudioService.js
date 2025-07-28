@@ -633,7 +633,7 @@ class AudioService {
   _parseFileSize(sizeString) {
     const units = { B: 1, KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
     const match = String(sizeString || '').trim().match(/^(\d+)\s*(B|KB|MB|GB)$/i);
-    if (!match) return 24 * 1024 * 1024; // default 24MB
+    if (!match) return 200 * 1024 * 1024; // default 200MB
     const [, value, unit] = match;
     return parseInt(value, 10) * (units[unit.toUpperCase()] || 1);
   }

@@ -63,7 +63,7 @@ const envSchema = Joi.object({
   UPLOAD_PATH: Joi.string()
     .default('./uploads'),
   MAX_FILE_SIZE: Joi.string()
-    .default('50MB'),
+    .default('200MB'),
   ALLOWED_AUDIO_FORMATS: Joi.string()
     .default('wav,mp3,m4a,flac,webm'),
   
