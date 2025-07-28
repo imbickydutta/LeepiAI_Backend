@@ -1,59 +1,120 @@
 require('dotenv').config();
 const Joi = require('joi');
+const logger = require('../utils/logger');
 
 // Define environment variables schema
 const envSchema = Joi.object({
-  NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
-  PORT: Joi.number().default(3001),
+  // Node environment
+  NODE_ENV: Joi.string()
+    .valid('development', 'production', 'test')
+    .default('development'),
+  
+  // Server
+  PORT: Joi.number()
+    .default(process.env.PORT || 3001),
   
   // Database
-  MONGODB_URI: Joi.string().required(),
-  MONGODB_URI_PROD: Joi.string().when('NODE_ENV', {
-    is: 'production',
-    then: Joi.required(),
-    otherwise: Joi.optional()
-  }),
+  MONGODB_URI: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.optional(),
+      otherwise: Joi.required()
+    }),
+  MONGODB_URI_PROD: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.required(),
+      otherwise: Joi.optional()
+    }),
   
-  // JWT
-  JWT_SECRET: Joi.string().min(32).required(),
-  JWT_REFRESH_SECRET: Joi.string().min(32).required(),
-  JWT_EXPIRES_IN: Joi.string().default('7d'),
-  JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
+  // JWT (with more secure defaults)
+  JWT_SECRET: Joi.string()
+    .min(32)
+    .default('your-development-jwt-secret-key-minimum-32-chars'),
+  JWT_REFRESH_SECRET: Joi.string()
+    .min(32)
+    .default('your-development-refresh-secret-key-minimum-32-chars'),
+  JWT_EXPIRES_IN: Joi.string()
+    .default('7d'),
+  JWT_REFRESH_EXPIRES_IN: Joi.string()
+    .default('30d'),
   
-  // API Keys
-  OPENAI_API_KEY: Joi.string().required(),
-  GEMINI_API_KEY: Joi.string().required(),
+  // API Keys (optional in development)
+  OPENAI_API_KEY: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.required(),
+      otherwise: Joi.optional()
+    }),
+  GEMINI_API_KEY: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.required(),
+      otherwise: Joi.optional()
+    }),
   
-  // CORS
-  CORS_ORIGIN: Joi.string().default('http://localhost:3000'),
+  // CORS (with secure defaults)
+  CORS_ORIGIN: Joi.string()
+    .default(process.env.NODE_ENV === 'production' 
+      ? 'app://*,capacitor://localhost' 
+      : 'http://localhost:3000,http://localhost:*,app://*,capacitor://localhost'),
   
   // File Upload
-  UPLOAD_PATH: Joi.string().default('./uploads'),
-  MAX_FILE_SIZE: Joi.string().default('50MB'),
-  ALLOWED_AUDIO_FORMATS: Joi.string().default('wav,mp3,m4a,flac'),
+  UPLOAD_PATH: Joi.string()
+    .default('./uploads'),
+  MAX_FILE_SIZE: Joi.string()
+    .default('50MB'),
+  ALLOWED_AUDIO_FORMATS: Joi.string()
+    .default('wav,mp3,m4a,flac,webm'),
   
   // Logging
-  LOG_LEVEL: Joi.string().valid('error', 'warn', 'info', 'debug').default('info'),
-  LOG_FILE: Joi.string().default('./logs/app.log'),
+  LOG_LEVEL: Joi.string()
+    .valid('error', 'warn', 'info', 'debug')
+    .default('info'),
+  LOG_FILE: Joi.string()
+    .default('./logs/app.log'),
   
   // Rate Limiting
-  RATE_LIMIT_WINDOW_MS: Joi.number().default(900000), // 15 minutes
-  RATE_LIMIT_MAX_REQUESTS: Joi.number().default(100)
+  RATE_LIMIT_WINDOW_MS: Joi.number()
+    .default(900000), // 15 minutes
+  RATE_LIMIT_MAX_REQUESTS: Joi.number()
+    .default(100)
 }).unknown();
 
 // Validate environment variables
-const { error, value: envVars } = envSchema.validate(process.env);
+const { error, value: envVars } = envSchema.validate(process.env, {
+  stripUnknown: true,
+  abortEarly: false
+});
 
 if (error) {
-  throw new Error(`Environment validation error: ${error.message}`);
+  const missingVars = error.details.map(detail => detail.message).join('\n');
+  logger.error('❌ Environment validation failed:', {
+    errors: error.details,
+    env: process.env.NODE_ENV
+  });
+  throw new Error(`Environment validation error:\n${missingVars}`);
 }
 
+// Log environment status
+logger.info('✅ Environment variables loaded:', {
+  nodeEnv: envVars.NODE_ENV,
+  port: envVars.PORT,
+  dbConnected: !!envVars[envVars.NODE_ENV === 'production' ? 'MONGODB_URI_PROD' : 'MONGODB_URI'],
+  openAiKey: !!envVars.OPENAI_API_KEY,
+  geminiKey: !!envVars.GEMINI_API_KEY,
+  corsOrigin: envVars.CORS_ORIGIN
+});
+
+// Export validated config
 module.exports = {
   env: envVars.NODE_ENV,
   port: envVars.PORT,
   
   database: {
-    uri: envVars.NODE_ENV === 'production' ? envVars.MONGODB_URI_PROD : envVars.MONGODB_URI
+    uri: envVars.NODE_ENV === 'production' 
+      ? envVars.MONGODB_URI_PROD 
+      : envVars.MONGODB_URI
   },
   
   jwt: {

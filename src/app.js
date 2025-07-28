@@ -133,22 +133,42 @@ app.get('/', (req, res) => {
   });
 });
 
+// Health check endpoint with detailed status
 app.get('/health', async (req, res) => {
   try {
+    const dbStatus = database.getConnectionStatus();
     const health = {
-      status: 'healthy',
+      status: dbStatus.state === 'connected' ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      database: database.isDbConnected() ? 'connected' : 'disconnected',
-      memory: process.memoryUsage(),
-      environment: config.env
+      environment: config.env,
+      database: {
+        status: dbStatus.state,
+        isConnected: dbStatus.isConnected,
+        host: dbStatus.host,
+        name: dbStatus.name
+      },
+      memory: {
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB',
+        external: Math.round(process.memoryUsage().external / 1024 / 1024) + 'MB'
+      }
     };
+
+    if (health.status === 'unhealthy') {
+      return res.status(503).json({
+        success: false,
+        error: 'Service unhealthy',
+        details: health
+      });
+    }
 
     res.json({
       success: true,
       data: health
     });
   } catch (error) {
+    logger.error('❌ Health check failed:', error);
     res.status(503).json({
       success: false,
       error: 'Health check failed',
@@ -188,25 +208,49 @@ app.use(errorHandler);
 
 const startServer = async () => {
   try {
-    // Connect to database
+    // Connect to database with retries
+    logger.info('📡 Initializing database connection...');
     await database.connect();
+
+    // Verify database connection
+    if (!database.isDbConnected()) {
+      throw new Error('Database connection verification failed');
+    }
+
+    // Initialize models and ensure indexes
+    logger.info('🔍 Verifying database models and indexes...');
+    const User = require('./models/User');
+    const Session = require('./models/Session');
+    const Settings = require('./models/Settings');
     
+    // Ensure indexes are created
+    await Promise.all([
+      User.syncIndexes(),
+      Session.syncIndexes(),
+      Settings.syncIndexes()
+    ]);
+
+    logger.info('✅ Database models and indexes verified');
+
     // Start HTTP server
     const PORT = config.port;
     const server = app.listen(PORT, () => {
       logger.info(`🚀 LeepiAI Backend server running on port ${PORT}`);
       logger.info(`🌍 Environment: ${config.env}`);
       logger.info(`📊 CORS origin: ${config.cors.origin}`);
+      logger.info(`💾 Database: ${database.getConnectionStatus().state}`);
     });
 
     // Graceful shutdown handling
     const gracefulShutdown = async (signal) => {
       logger.info(`📴 Received ${signal}. Starting graceful shutdown...`);
       
+      // Stop accepting new requests
       server.close(async () => {
         logger.info('🔌 HTTP server closed');
         
         try {
+          // Close database connection
           await database.disconnect();
           logger.info('✅ Graceful shutdown completed');
           process.exit(0);
@@ -215,6 +259,12 @@ const startServer = async () => {
           process.exit(1);
         }
       });
+
+      // Force shutdown after timeout
+      setTimeout(() => {
+        logger.error('⚠️ Forced shutdown after timeout');
+        process.exit(1);
+      }, 30000); // 30 seconds timeout
     };
 
     // Handle shutdown signals
@@ -223,18 +273,33 @@ const startServer = async () => {
 
     // Handle uncaught exceptions
     process.on('uncaughtException', (error) => {
-      logger.error('💥 Uncaught Exception:', error);
-      process.exit(1);
+      logger.error('💥 Uncaught Exception:', {
+        error: error.message,
+        stack: error.stack,
+        type: error.name
+      });
+      gracefulShutdown('UNCAUGHT_EXCEPTION');
     });
 
+    // Handle unhandled promise rejections
     process.on('unhandledRejection', (reason, promise) => {
-      logger.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
-      process.exit(1);
+      logger.error('💥 Unhandled Rejection:', {
+        reason: reason instanceof Error ? reason.message : reason,
+        stack: reason instanceof Error ? reason.stack : undefined,
+        promise: promise
+      });
+      gracefulShutdown('UNHANDLED_REJECTION');
     });
 
     return server;
   } catch (error) {
-    logger.error('❌ Failed to start server:', error);
+    logger.error('❌ Failed to start server:', {
+      error: error.message,
+      stack: error.stack,
+      type: error.name
+    });
+    
+    // Exit with error
     process.exit(1);
   }
 };

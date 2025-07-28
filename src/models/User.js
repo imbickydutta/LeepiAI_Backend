@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const logger = require('../utils/logger');
 
 const userSchema = new mongoose.Schema({
   id: {
@@ -59,17 +60,51 @@ const userSchema = new mongoose.Schema({
     type: Date
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  // Enable automatic index creation
+  autoIndex: true
 });
 
-// Create unique indexes
-userSchema.index({ email: 1 }, { unique: true });
-userSchema.index({ id: 1 }, { unique: true });
+// Define all indexes in one place for better visibility
+const indexes = [
+  // Unique indexes
+  { fields: { email: 1 }, options: { unique: true, name: 'email_unique' } },
+  { fields: { id: 1 }, options: { unique: true, name: 'id_unique' } },
+  
+  // Performance indexes
+  { fields: { createdAt: -1 }, options: { name: 'createdAt_desc' } },
+  { fields: { role: 1 }, options: { name: 'role_asc' } },
+  { fields: { isActive: 1 }, options: { name: 'isActive_asc' } },
+  
+  // Compound indexes
+  { fields: { role: 1, isActive: 1 }, options: { name: 'role_isActive' } },
+  { fields: { email: 1, isActive: 1 }, options: { name: 'email_isActive' } }
+];
 
-// Additional indexes for performance
-userSchema.index({ createdAt: -1 });
-userSchema.index({ role: 1 });
-userSchema.index({ isActive: 1 });
+// Create all indexes
+indexes.forEach(index => {
+  userSchema.index(index.fields, index.options);
+});
+
+// Static method to ensure indexes exist
+userSchema.statics.ensureIndexes = async function() {
+  try {
+    logger.info('🔍 Creating User model indexes...');
+    const indexResults = await this.collection.listIndexes().toArray();
+    logger.info('📊 Current indexes:', indexResults.map(idx => idx.name));
+    
+    // Force recreate indexes
+    await this.syncIndexes();
+    
+    const updatedIndexes = await this.collection.listIndexes().toArray();
+    logger.info('✅ User model indexes created successfully:', updatedIndexes.map(idx => idx.name));
+    
+    return true;
+  } catch (error) {
+    logger.error('❌ Failed to create User model indexes:', error);
+    throw error;
+  }
+};
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
@@ -106,25 +141,11 @@ userSchema.methods.getPublicProfile = function() {
   };
 };
 
-// Static method to find by custom id
-userSchema.statics.findByCustomId = function(id) {
-  return this.findOne({ id });
-};
+const User = mongoose.model('User', userSchema);
 
-// Virtual for full name
-userSchema.virtual('fullName').get(function() {
-  return `${this.firstName} ${this.lastName}`;
-});
+// Create indexes on model compilation
+User.ensureIndexes()
+  .then(() => logger.info('✅ User model initialized with indexes'))
+  .catch(error => logger.error('❌ Failed to initialize User model indexes:', error));
 
-// Ensure virtual fields are serialized
-userSchema.set('toJSON', {
-  virtuals: true,
-  transform: function(doc, ret) {
-    delete ret.password;
-    delete ret._id;
-    delete ret.__v;
-    return ret;
-  }
-});
-
-module.exports = mongoose.model('User', userSchema); 
+module.exports = User; 
