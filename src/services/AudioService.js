@@ -173,7 +173,9 @@ class AudioService {
           const segs = (res.segments || []).map(s => ({
             ...s,
             start: (s.start || 0) + offset,
-            end: (s.end || 0) + offset
+            end: (s.end || 0) + offset,
+            source: s.source || 'input',
+            speaker: s.speaker || 'unknown'
           }));
 
           allSegments.push(...segs);
@@ -440,7 +442,7 @@ class AudioService {
       }
 
       const transcription = await this.openai.audio.transcriptions.create(req);
-      const processed = this._processTranscriptionResult(transcription);
+      const processed = this._processTranscriptionResult(transcription, 'input', 'unknown');
 
       return { success: true, ...processed };
     } catch (err) {
@@ -457,19 +459,21 @@ class AudioService {
     }
   }
 
-  _processTranscriptionResult(transcription) {
+  _processTranscriptionResult(transcription, source = 'input', speaker = 'unknown') {
     let segments = [];
     // Prefer explicit segments if provided
     if (transcription.segments && transcription.segments.length > 0) {
       segments = transcription.segments.map(s => ({
         start: s.start,
         end: s.end,
-        text: (s.text || '').trim()
+        text: (s.text || '').trim(),
+        source: s.source || source,
+        speaker: s.speaker || speaker
       }));
     } else if (transcription.words && transcription.words.length > 0) {
-      segments = this._groupWordsIntoSegments(transcription.words);
+      segments = this._groupWordsIntoSegments(transcription.words, source, speaker);
     } else if (transcription.text) {
-      segments = this._createSegmentsFromText(transcription.text);
+      segments = this._createSegmentsFromText(transcription.text, source, speaker);
     }
 
     const duration = segments.length > 0 
@@ -484,7 +488,7 @@ class AudioService {
     };
   }
 
-  _groupWordsIntoSegments(words) {
+  _groupWordsIntoSegments(words, source = 'input', speaker = 'unknown') {
     const segments = [];
     let current = null;
     let bucket = [];
@@ -503,26 +507,44 @@ class AudioService {
         const boundary = /[.!?]/.test(w.word) || gapNext > 1.0 || bucket.length >= 20;
 
         if (boundary) {
-          segments.push({ start: current.start, end: current.end, text: current.text.trim() });
+          segments.push({ 
+            start: current.start, 
+            end: current.end, 
+            text: current.text.trim(),
+            source: source,
+            speaker: speaker
+          });
           current = null;
           bucket = [];
         }
       }
     }
     if (current) {
-      segments.push({ start: current.start, end: current.end, text: current.text.trim() });
+      segments.push({ 
+        start: current.start, 
+        end: current.end, 
+        text: current.text.trim(),
+        source: source,
+        speaker: speaker
+      });
     }
     return segments;
   }
 
-  _createSegmentsFromText(text) {
+  _createSegmentsFromText(text, source = 'input', speaker = 'unknown') {
     if (!text) return [];
     const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
     const segs = [];
     let t = 0;
     sentences.forEach(sentence => {
       const d = Math.max(2, sentence.length * 0.05);
-      segs.push({ start: t, end: t + d, text: sentence.trim() });
+      segs.push({ 
+        start: t, 
+        end: t + d, 
+        text: sentence.trim(),
+        source: source,
+        speaker: speaker
+      });
       t += d + 0.5;
     });
     return segs;
@@ -542,7 +564,13 @@ class AudioService {
       const curr = dedup[i];
       const prev = result[result.length - 1];
       if (prev && (curr.start - prev.end) > GAP_SEC) {
-        result.push({ start: prev.end, end: curr.start, text: '[pause]' });
+        result.push({ 
+          start: prev.end, 
+          end: curr.start, 
+          text: '[pause]',
+          source: 'input', // Default source for pause segments
+          speaker: 'system'
+        });
       }
       result.push(curr);
     }
