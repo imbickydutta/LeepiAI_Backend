@@ -740,6 +740,42 @@ class DatabaseService {
   }
 
   /**
+   * Update transcript for admin (no user restriction)
+   * @param {string} transcriptId - Transcript ID
+   * @param {Object} updates - Updates to apply
+   * @returns {Promise<Object>} Updated transcript
+   */
+  async updateTranscriptForAdmin(transcriptId, updates) {
+    try {
+      const transcript = await Transcript.findOne({ id: transcriptId });
+      
+      if (!transcript) {
+        throw new Error('Transcript not found');
+      }
+
+      // Remove read-only fields
+      delete updates.id;
+      delete updates.userId;
+      delete updates.createdAt;
+      delete updates.updatedAt;
+
+      // Apply updates
+      Object.assign(transcript, updates);
+      await transcript.save();
+
+      logger.info('📝 Admin updated transcript', {
+        transcriptId,
+        fields: Object.keys(updates)
+      });
+
+      return transcript.toObject();
+    } catch (error) {
+      logger.error('❌ Failed to update transcript for admin:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all users for admin with filtering and transcript counts
    * @param {Object} options - Filter and pagination options
    * @returns {Promise<Object>} Users and total count

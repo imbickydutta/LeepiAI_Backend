@@ -134,6 +134,130 @@ router.post('/debrief/:transcriptId',
 );
 
 /**
+ * POST /api/ai/admin/summary/:transcriptId
+ * Generate summary for any transcript (admin only)
+ */
+router.post('/admin/summary/:transcriptId',
+  authenticate,
+  requireAdmin,
+  requireDatabase,
+  asyncHandler(async (req, res) => {
+    const { transcriptId } = req.params;
+    
+    // Get transcript (no user restriction for admin)
+    const transcript = await databaseService.getTranscriptForAdmin(transcriptId);
+    
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+    
+    // Check if summary already exists
+    if (transcript.summary) {
+      return res.json({
+        success: true,
+        message: 'Summary already exists',
+        summary: transcript.summary,
+        cached: true
+      });
+    }
+
+    // Generate summary
+    const result = await aiService.generateSummary(transcript.content);
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+    // Save summary to database (admin can update any transcript)
+    await databaseService.updateTranscriptForAdmin(transcriptId, {
+      summary: result.summary
+    });
+
+    logger.info('📝 Admin generated summary', {
+      transcriptId,
+      adminId: req.user.id,
+      originalUserId: transcript.userId,
+      summaryLength: result.summary.length
+    });
+
+    res.json({
+      success: true,
+      message: 'Summary generated successfully',
+      summary: result.summary,
+      cached: false
+    });
+  })
+);
+
+/**
+ * POST /api/ai/admin/debrief/:transcriptId
+ * Generate debrief for any transcript (admin only)
+ */
+router.post('/admin/debrief/:transcriptId',
+  authenticate,
+  requireAdmin,
+  requireDatabase,
+  asyncHandler(async (req, res) => {
+    const { transcriptId } = req.params;
+    
+    // Get transcript (no user restriction for admin)
+    const transcript = await databaseService.getTranscriptForAdmin(transcriptId);
+    
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+    
+    // Check if debrief already exists
+    if (transcript.debrief?.content) {
+      return res.json({
+        success: true,
+        message: 'Debrief already exists',
+        debrief: transcript.debrief,
+        cached: true
+      });
+    }
+
+    // Generate debrief
+    const result = await aiService.generateInterviewDebrief(transcript.content);
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+    // Save debrief to database (admin can update any transcript)
+    await databaseService.updateTranscriptForAdmin(transcriptId, {
+      debrief: result.debrief
+    });
+
+    logger.info('📊 Admin generated debrief', {
+      transcriptId,
+      adminId: req.user.id,
+      originalUserId: transcript.userId,
+      debriefLength: result.debrief.content.length
+    });
+
+    res.json({
+      success: true,
+      message: 'Debrief generated successfully',
+      debrief: result.debrief,
+      cached: false
+    });
+  })
+);
+
+/**
  * POST /api/ai/chat/:transcriptId
  * Chat with AI about transcript
  */
