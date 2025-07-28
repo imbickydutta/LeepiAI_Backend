@@ -7,12 +7,17 @@ const logger = require('../utils/logger');
 
 class AudioService {
   constructor() {
-    // Initialize OpenAI client
-    this.openai = new OpenAI({
-      apiKey: config.apis.openai,
-      timeout: 30000, // 30 second timeout
-      maxRetries: 3
-    });
+    // Initialize OpenAI client with better error handling
+    if (!config.apis.openai) {
+      logger.error('❌ OpenAI API key is missing. Audio transcription will not work.');
+      this.openai = null;
+    } else {
+      this.openai = new OpenAI({
+        apiKey: config.apis.openai,
+        timeout: 60000, // Increase timeout to 60 seconds
+        maxRetries: 3
+      });
+    }
     
     // Initialize upload configuration
     this.uploadPath = path.join(__dirname, '../../uploads');
@@ -25,15 +30,20 @@ class AudioService {
     logger.info('🎵 AudioService initialized');
     
     // Test OpenAI API connection asynchronously (completely non-blocking)
-    setImmediate(() => {
-      this._testOpenAIConnection()
-        .then(() => {
-          logger.info('✅ OpenAI API connection verified');
-        })
-        .catch(error => {
-          logger.warn('⚠️ OpenAI API connection test failed (service will still work):', error.message);
-        });
-    });
+    if (this.openai) {
+      setImmediate(() => {
+        this._testOpenAIConnection()
+          .then(() => {
+            logger.info('✅ OpenAI API connection verified');
+          })
+          .catch(error => {
+            logger.warn('⚠️ OpenAI API connection test failed (service will still work):', error.message);
+          });
+      });
+    } else {
+      logger.error('❌ OpenAI API key is missing. Audio transcription features will not work.');
+      logger.info('💡 To fix this, add OPENAI_API_KEY to your Railway environment variables.');
+    }
   }
 
   /**
@@ -122,6 +132,11 @@ class AudioService {
     let fileStats = null;
     
     try {
+      // Check if OpenAI is available
+      if (!this.openai) {
+        throw new Error('OpenAI API is not configured. Please check your API key.');
+      }
+
       const {
         language = 'en',
         responseFormat = 'verbose_json',
@@ -143,18 +158,47 @@ class AudioService {
       const audioStream = fs.createReadStream(audioFilePath);
 
       try {
-        // Attempt transcription
-        const transcription = await this.openai.audio.transcriptions.create({
-          file: audioStream,
-          model: 'whisper-1',
-          language,
-          response_format: responseFormat,
-          timestamp_granularities: timestampGranularities,
-          temperature
-        });
+        // Attempt transcription with retry logic
+        let transcription;
+        let lastError;
+        
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            logger.info(`🔄 Transcription attempt ${attempt}/3`);
+            
+            transcription = await this.openai.audio.transcriptions.create({
+              file: audioStream,
+              model: 'whisper-1',
+              language,
+              response_format: responseFormat,
+              timestamp_granularities: timestampGranularities,
+              temperature
+            });
 
-        logger.info('✅ Whisper transcription completed successfully');
-        return this._processTranscriptionResult(transcription);
+            logger.info('✅ Whisper transcription completed successfully');
+            return this._processTranscriptionResult(transcription);
+            
+          } catch (retryError) {
+            lastError = retryError;
+            
+            // Don't retry on authentication or rate limit errors
+            if (retryError.status === 401 || retryError.status === 429) {
+              throw retryError;
+            }
+            
+            if (attempt < 3) {
+              logger.warn(`⚠️ Transcription attempt ${attempt} failed, retrying...`, {
+                error: retryError.message,
+                attempt: attempt
+              });
+              // Wait before retry (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+            }
+          }
+        }
+        
+        // All retries failed
+        throw lastError;
 
       } catch (error) {
         // Handle specific OpenAI errors
@@ -174,12 +218,21 @@ class AudioService {
           throw new Error('OpenAI API rate limit exceeded. Please try again later.');
         }
 
-        if (error.message.includes('Connection')) {
+        if (error.message.includes('Connection') || error.message.includes('ENOTFOUND') || error.message.includes('ECONNREFUSED')) {
           logger.error('❌ OpenAI API connection failed:', {
+            error: error.message,
+            status: error.status,
+            type: error.constructor.name
+          });
+          throw new Error('Cannot connect to OpenAI API. Please check your internet connection and try again.');
+        }
+
+        if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+          logger.error('❌ OpenAI API request timed out:', {
             error: error.message,
             status: error.status
           });
-          throw new Error('Cannot connect to OpenAI API. Please check network connectivity.');
+          throw new Error('OpenAI API request timed out. Please try again.');
         }
 
         // Log unknown errors
