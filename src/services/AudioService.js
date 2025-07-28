@@ -52,6 +52,7 @@ class AudioService {
       }
       throw error;
     }
+  }
 
   /**
    * Upload and validate audio file
