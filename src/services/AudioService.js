@@ -7,6 +7,12 @@ const logger = require('../utils/logger');
 
 class AudioService {
   constructor() {
+    // Validate OpenAI API key
+    if (!config.apis.openai) {
+      logger.error('❌ OpenAI API key is missing');
+      throw new Error('OpenAI API key is required');
+    }
+
     this.openai = new OpenAI({
       apiKey: config.apis.openai
     });
@@ -17,8 +23,35 @@ class AudioService {
     // Ensure upload directory exists
     fs.ensureDirSync(this.uploadPath);
     
+    // Test OpenAI API connection
+    this._testOpenAIConnection();
+    
     logger.info('🎵 AudioService initialized');
   }
+
+  /**
+   * Test OpenAI API connection
+   * @private
+   */
+  async _testOpenAIConnection() {
+    try {
+      // Try a simple models list call to test connection
+      await this.openai.models.list();
+      logger.info('✅ OpenAI API connection successful');
+    } catch (error) {
+      logger.error('❌ OpenAI API connection test failed:', {
+        error: error.message,
+        type: error.constructor.name,
+        status: error.status
+      });
+      
+      if (error.message.includes('API key')) {
+        throw new Error('Invalid OpenAI API key');
+      } else if (error.message.includes('Connection')) {
+        throw new Error('Cannot connect to OpenAI API. Please check network connectivity.');
+      }
+      throw error;
+    }
 
   /**
    * Upload and validate audio file
@@ -99,41 +132,67 @@ class AudioService {
       
       logger.info(`🔄 Starting Whisper transcription for ${fileSizeMB.toFixed(2)}MB file`);
 
-      // Check file size limit (OpenAI has 25MB limit)
-      if (fileSizeMB > 24) {
-        logger.warn('⚠️ File too large, attempting compression...');
-        const compressedPath = await this._compressAudioFile(audioFilePath);
-        audioFilePath = compressedPath;
-      }
-
-      // Create readable stream
+      // Create file read stream
       const audioStream = fs.createReadStream(audioFilePath);
 
-      // Call OpenAI Whisper API
-      const transcription = await this.openai.audio.transcriptions.create({
-        file: audioStream,
-        model: 'whisper-1',
-        language,
-        response_format: responseFormat,
-        timestamp_granularities: timestampGranularities,
-        temperature
-      });
+      try {
+        // Attempt transcription
+        const transcription = await this.openai.audio.transcriptions.create({
+          file: audioStream,
+          model: 'whisper-1',
+          language,
+          response_format: responseFormat,
+          timestamp_granularities: timestampGranularities,
+          temperature
+        });
 
-      // Process transcription result
-      const result = this._processTranscriptionResult(transcription);
+        logger.info('✅ Whisper transcription completed successfully');
+        return this._processTranscriptionResult(transcription);
 
-      logger.info('✅ Whisper transcription completed', {
-        duration: result.duration,
-        segmentCount: result.segments.length,
-        wordCount: result.text.split(/\s+/).length
-      });
+      } catch (error) {
+        // Handle specific OpenAI errors
+        if (error.status === 401) {
+          logger.error('❌ OpenAI API authentication failed:', {
+            error: error.message,
+            status: error.status
+          });
+          throw new Error('OpenAI API authentication failed. Please check your API key.');
+        }
+        
+        if (error.status === 429) {
+          logger.error('❌ OpenAI API rate limit exceeded:', {
+            error: error.message,
+            status: error.status
+          });
+          throw new Error('OpenAI API rate limit exceeded. Please try again later.');
+        }
 
-      return {
-        success: true,
-        ...result
-      };
+        if (error.message.includes('Connection')) {
+          logger.error('❌ OpenAI API connection failed:', {
+            error: error.message,
+            status: error.status
+          });
+          throw new Error('Cannot connect to OpenAI API. Please check network connectivity.');
+        }
+
+        // Log unknown errors
+        logger.error('❌ Whisper transcription failed:', {
+          error: error.message,
+          status: error.status,
+          type: error.constructor.name
+        });
+        throw error;
+      } finally {
+        // Always close the stream
+        audioStream.destroy();
+      }
+
     } catch (error) {
-      logger.error('❌ Whisper transcription failed:', error);
+      logger.error('❌ Transcription process failed:', {
+        error: error.message,
+        file: audioFilePath,
+        size: fileStats?.size
+      });
       return {
         success: false,
         error: error.message
