@@ -217,20 +217,32 @@ const startServer = async () => {
       throw new Error('Database connection verification failed');
     }
 
-    // Initialize models and ensure indexes
-    logger.info('🔍 Verifying database models and indexes...');
+    // Initialize models
+    logger.info('🔍 Loading database models...');
     const User = require('./models/User');
     const Session = require('./models/Session');
     const Settings = require('./models/Settings');
-    
-    // Ensure indexes are created
-    await Promise.all([
-      User.syncIndexes(),
-      Session.syncIndexes(),
-      Settings.syncIndexes()
-    ]);
 
-    logger.info('✅ Database models and indexes verified');
+    // Wait for models to be ready
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Create indexes if needed
+    logger.info('📊 Verifying database indexes...');
+    
+    try {
+      await Promise.all([
+        User.ensureIndexes(),
+        Session.ensureIndexes(),
+        Settings.ensureIndexes()
+      ]);
+      logger.info('✅ Database indexes verified');
+    } catch (error) {
+      // Log error but continue startup
+      logger.error('⚠️ Failed to verify indexes:', {
+        error: error.message,
+        stack: error.stack
+      });
+    }
 
     // Start HTTP server
     const PORT = config.port;

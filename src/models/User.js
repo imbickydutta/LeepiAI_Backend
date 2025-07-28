@@ -61,8 +61,8 @@ const userSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true,
-  // Enable automatic index creation
-  autoIndex: true
+  // Disable automatic index creation in production
+  autoIndex: process.env.NODE_ENV !== 'production'
 });
 
 // Define all indexes in one place for better visibility
@@ -90,19 +90,47 @@ indexes.forEach(index => {
 userSchema.statics.ensureIndexes = async function() {
   try {
     logger.info('🔍 Creating User model indexes...');
-    const indexResults = await this.collection.listIndexes().toArray();
-    logger.info('📊 Current indexes:', indexResults.map(idx => idx.name));
+
+    // Wait for connection to be ready
+    if (mongoose.connection.readyState !== 1) {
+      throw new Error('Database connection not ready');
+    }
+
+    // Get existing indexes
+    const existingIndexes = await mongoose.connection.db
+      .collection('users')
+      .indexes();
+
+    logger.info('📊 Current indexes:', 
+      existingIndexes.map(idx => ({
+        name: idx.name,
+        key: idx.key
+      }))
+    );
     
     // Force recreate indexes
     await this.syncIndexes();
     
-    const updatedIndexes = await this.collection.listIndexes().toArray();
-    logger.info('✅ User model indexes created successfully:', updatedIndexes.map(idx => idx.name));
+    // Get updated indexes
+    const updatedIndexes = await mongoose.connection.db
+      .collection('users')
+      .indexes();
+
+    logger.info('✅ User model indexes created successfully:', 
+      updatedIndexes.map(idx => ({
+        name: idx.name,
+        key: idx.key
+      }))
+    );
     
     return true;
   } catch (error) {
-    logger.error('❌ Failed to create User model indexes:', error);
-    throw error;
+    logger.error('❌ Failed to create User model indexes:', {
+      error: error.message,
+      stack: error.stack
+    });
+    // Don't throw error, just log it
+    return false;
   }
 };
 
@@ -143,9 +171,6 @@ userSchema.methods.getPublicProfile = function() {
 
 const User = mongoose.model('User', userSchema);
 
-// Create indexes on model compilation
-User.ensureIndexes()
-  .then(() => logger.info('✅ User model initialized with indexes'))
-  .catch(error => logger.error('❌ Failed to initialize User model indexes:', error));
-
+// Don't automatically create indexes on model compilation
+// Instead, let the app explicitly call ensureIndexes when ready
 module.exports = User; 
