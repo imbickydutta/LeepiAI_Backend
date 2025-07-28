@@ -476,6 +476,9 @@ class AudioService {
       segments = this._createSegmentsFromText(transcription.text, source, speaker);
     }
 
+    // Filter out segments with empty text to prevent validation errors
+    segments = segments.filter(segment => segment.text && segment.text.trim().length > 0);
+
     const duration = segments.length > 0 
       ? Math.max(...segments.map(s => s.end || 0))
       : this._estimateDurationFromText(transcription.text);
@@ -507,26 +510,32 @@ class AudioService {
         const boundary = /[.!?]/.test(w.word) || gapNext > 1.0 || bucket.length >= 20;
 
         if (boundary) {
-          segments.push({ 
-            start: current.start, 
-            end: current.end, 
-            text: current.text.trim(),
-            source: source,
-            speaker: speaker
-          });
+          const segmentText = current.text.trim();
+          if (segmentText && segmentText.length > 0) {
+            segments.push({ 
+              start: current.start, 
+              end: current.end, 
+              text: segmentText,
+              source: source,
+              speaker: speaker
+            });
+          }
           current = null;
           bucket = [];
         }
       }
     }
     if (current) {
-      segments.push({ 
-        start: current.start, 
-        end: current.end, 
-        text: current.text.trim(),
-        source: source,
-        speaker: speaker
-      });
+      const segmentText = current.text.trim();
+      if (segmentText && segmentText.length > 0) {
+        segments.push({ 
+          start: current.start, 
+          end: current.end, 
+          text: segmentText,
+          source: source,
+          speaker: speaker
+        });
+      }
     }
     return segments;
   }
@@ -537,15 +546,18 @@ class AudioService {
     const segs = [];
     let t = 0;
     sentences.forEach(sentence => {
-      const d = Math.max(2, sentence.length * 0.05);
-      segs.push({ 
-        start: t, 
-        end: t + d, 
-        text: sentence.trim(),
-        source: source,
-        speaker: speaker
-      });
-      t += d + 0.5;
+      const trimmedSentence = sentence.trim();
+      if (trimmedSentence && trimmedSentence.length > 0) {
+        const d = Math.max(2, trimmedSentence.length * 0.05);
+        segs.push({ 
+          start: t, 
+          end: t + d, 
+          text: trimmedSentence,
+          source: source,
+          speaker: speaker
+        });
+        t += d + 0.5;
+      }
     });
     return segs;
   }

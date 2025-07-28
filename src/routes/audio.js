@@ -315,8 +315,22 @@ router.post('/upload-segmented-dual',
         });
       }
 
+      // Filter out segments with empty text to prevent validation errors
+      const validSegments = allSegments.filter(segment => 
+        segment.text && segment.text.trim().length > 0
+      );
+
+      if (validSegments.length === 0) {
+        logger.warn('⚠️ No valid segments found after filtering empty text');
+        await cleanupFiles(filesToCleanup);
+        return res.status(400).json({
+          success: false,
+          error: 'No valid transcription segments found'
+        });
+      }
+
       // Format transcript content from all merged segments
-      const transcript = allSegments.map((segment, index) => {
+      const transcript = validSegments.map((segment, index) => {
         const sourceLabel = segment.source === 'input' ? 'MIC' : 'SYS';
         const startTime = typeof segment.start === 'number' ? segment.start.toFixed(1) : '0.0';
         const timeLabel = `[${startTime}s]`;
@@ -329,10 +343,10 @@ router.post('/upload-segmented-dual',
         userId: req.user.id,
         title: `Segmented Dual Audio Recording - ${new Date().toISOString().split('T')[0]}`,
         content: transcript,
-        segments: allSegments,
+        segments: validSegments,
         metadata: {
           duration: totalDuration,
-          segmentCount: allSegments.length,
+          segmentCount: validSegments.length,
           hasInputAudio: !!microphone,
           hasOutputAudio: !!system,
           sources: ['input', 'output'].filter(source => 
