@@ -481,26 +481,26 @@ class DatabaseService {
           }
         ]),
 
-        // Transcript statistics
+        // Transcript statistics with null-safe operations
         Transcript.aggregate([
           {
             $group: {
               _id: null,
               totalTranscripts: { $sum: 1 },
-              totalDuration: { $sum: '$metadata.duration' },
-              avgDuration: { $avg: '$metadata.duration' },
-              totalStorage: { $sum: '$metadata.fileSize' }
+              totalDuration: { $sum: { $ifNull: ['$metadata.duration', 0] } },
+              avgDuration: { $avg: { $ifNull: ['$metadata.duration', 0] } },
+              totalStorage: { $sum: { $ifNull: ['$metadata.fileSize', 0] } }
             }
           }
         ]),
 
-        // Storage usage by type
+        // Storage usage by type with null-safe operations
         Transcript.aggregate([
           {
             $group: {
-              _id: '$metadata.fileType',
+              _id: { $ifNull: ['$metadata.fileType', 'unknown'] },
               count: { $sum: 1 },
-              totalSize: { $sum: '$metadata.fileSize' }
+              totalSize: { $sum: { $ifNull: ['$metadata.fileSize', 0] } }
             }
           }
         ]),
@@ -511,6 +511,7 @@ class DatabaseService {
           .limit(10)
           .populate('userId', 'firstName lastName email')
           .select('title createdAt metadata.duration userId')
+          .lean()
       ]);
 
       // Format user stats
@@ -533,35 +534,35 @@ class DatabaseService {
         byType: storageStats.map(stat => ({
           type: stat._id || 'unknown',
           count: stat.count,
-          size: stat.totalSize
+          size: stat.totalSize || 0
         })),
-        total: transcripts.totalStorage
+        total: transcripts.totalStorage || 0
       };
 
-      // Format recent activity
+      // Format recent activity with null-safe access
       const activity = recentActivity.map(t => ({
         id: t.id,
-        title: t.title,
-        duration: t.metadata.duration,
+        title: t.title || 'Untitled',
+        duration: t.metadata?.duration || 0,
         createdAt: t.createdAt,
         user: t.userId ? {
-          name: `${t.userId.firstName} ${t.userId.lastName}`,
-          email: t.userId.email
+          name: `${t.userId.firstName || ''} ${t.userId.lastName || ''}`.trim() || 'Unknown User',
+          email: t.userId.email || 'No email'
         } : null
       }));
 
       return {
         users: {
-          total: users.totalUsers,
-          active: users.activeUsers,
-          admin: users.adminUsers,
+          total: users.totalUsers || 0,
+          active: users.activeUsers || 0,
+          admin: users.adminUsers || 0,
           inactivePercent: users.totalUsers ? 
             ((users.totalUsers - users.activeUsers) / users.totalUsers * 100).toFixed(1) : 0
         },
         transcripts: {
-          total: transcripts.totalTranscripts,
-          totalDuration: transcripts.totalDuration,
-          averageDuration: transcripts.avgDuration,
+          total: transcripts.totalTranscripts || 0,
+          totalDuration: transcripts.totalDuration || 0,
+          averageDuration: transcripts.avgDuration || 0,
           perUser: users.activeUsers ? 
             (transcripts.totalTranscripts / users.activeUsers).toFixed(1) : 0
         },
