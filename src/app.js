@@ -39,16 +39,55 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "http://localhost:*", "https://*"],
     },
   },
 }));
 
 // CORS configuration
 app.use(cors({
-  origin: config.cors.origin,
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, Electron)
+    if (!origin) {
+      logger.info('🌐 Allowing request with no origin');
+      return callback(null, true);
+    }
+
+    const allowedOrigins = config.cors.origin.split(',').map(o => o.trim());
+    
+    // Check if origin matches any allowed patterns
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (allowedOrigin.includes('*')) {
+        // Convert glob pattern to regex
+        const pattern = allowedOrigin
+          .replace(/\./g, '\\.')
+          .replace(/\*/g, '.*');
+        const regex = new RegExp(`^${pattern}$`);
+        const matches = regex.test(origin);
+        logger.debug(`🔍 Testing origin ${origin} against pattern ${pattern}: ${matches}`);
+        return matches;
+      }
+      return allowedOrigin === origin;
+    });
+
+    if (isAllowed) {
+      logger.info(`✅ Allowing origin: ${origin}`);
+      callback(null, true);
+    } else {
+      logger.warn(`🚫 Blocked request from unauthorized origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
+  exposedHeaders: ['Content-Disposition']
 }));
 
 // Rate limiting
