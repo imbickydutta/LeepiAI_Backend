@@ -144,15 +144,6 @@ class AudioService {
         throw new Error('OpenAI API is not configured. Please check your API key.');
       }
 
-      // Perform a quick health check before transcription
-      try {
-        await this._testOpenAIConnection();
-        logger.info('✅ OpenAI API health check passed before transcription');
-      } catch (healthError) {
-        logger.warn('⚠️ OpenAI API health check failed, but proceeding with transcription:', healthError.message);
-        // Don't throw here, let the transcription attempt proceed
-      }
-
       const {
         language = 'en',
         responseFormat = 'verbose_json',
@@ -173,106 +164,18 @@ class AudioService {
       // Create file read stream
       const audioStream = fs.createReadStream(audioFilePath);
 
-      try {
-        // Attempt transcription with retry logic
-        let transcription;
-        let lastError;
-        
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            logger.info(`🔄 Transcription attempt ${attempt}/3`);
-            
-            transcription = await this.openai.audio.transcriptions.create({
-              file: audioStream,
-              model: 'whisper-1',
-              language,
-              response_format: responseFormat,
-              timestamp_granularities: timestampGranularities,
-              temperature
-            });
+      // Single transcription attempt with proper error handling
+      const transcription = await this.openai.audio.transcriptions.create({
+        file: audioStream,
+        model: 'whisper-1',
+        language,
+        response_format: responseFormat,
+        timestamp_granularities: timestampGranularities,
+        temperature
+      });
 
-            logger.info('✅ Whisper transcription completed successfully');
-            return this._processTranscriptionResult(transcription);
-            
-          } catch (retryError) {
-            lastError = retryError;
-            
-            // Don't retry on authentication or rate limit errors
-            if (retryError.status === 401 || retryError.status === 429) {
-              throw retryError;
-            }
-            
-            if (attempt < 3) {
-              logger.warn(`⚠️ Transcription attempt ${attempt} failed, retrying...`, {
-                error: retryError.message,
-                attempt: attempt,
-                status: retryError.status,
-                code: retryError.code
-              });
-              // Progressive backoff: 2s, 5s, 10s
-              const delay = Math.pow(2, attempt) * 1000;
-              logger.info(`⏳ Waiting ${delay}ms before retry ${attempt + 1}/3`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-            }
-          }
-        }
-        
-        // All retries failed
-        throw lastError;
-
-      } catch (error) {
-        // Handle specific OpenAI errors
-        if (error.status === 401) {
-          logger.error('❌ OpenAI API authentication failed:', {
-            error: error.message,
-            status: error.status
-          });
-          throw new Error('OpenAI API authentication failed. Please check your API key.');
-        }
-        
-        if (error.status === 429) {
-          logger.error('❌ OpenAI API rate limit exceeded:', {
-            error: error.message,
-            status: error.status
-          });
-          throw new Error('OpenAI API rate limit exceeded. Please try again later.');
-        }
-
-        if (error.message.includes('Connection') || error.message.includes('ENOTFOUND') || error.message.includes('ECONNREFUSED')) {
-          logger.error('❌ OpenAI API connection failed:', {
-            error: error.message,
-            status: error.status,
-            type: error.constructor.name,
-            code: error.code
-          });
-          
-          // Railway-specific error handling
-          if (process.env.NODE_ENV === 'production') {
-            throw new Error('Railway deployment cannot connect to OpenAI API. This may be due to network restrictions or cold start issues. Please try again in a few minutes.');
-          } else {
-            throw new Error('Cannot connect to OpenAI API. Please check your internet connection and try again.');
-          }
-        }
-
-        if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
-          logger.error('❌ OpenAI API request timed out:', {
-            error: error.message,
-            status: error.status
-          });
-          throw new Error('OpenAI API request timed out. Please try again.');
-        }
-
-        // Log unknown errors
-        logger.error('❌ Whisper transcription failed:', {
-          error: error.message,
-          status: error.status,
-          type: error.constructor.name
-        });
-        throw error;
-      } finally {
-        // Always close the stream
-        audioStream.destroy();
-      }
+      logger.info('✅ Whisper transcription completed successfully');
+      return this._processTranscriptionResult(transcription);
 
     } catch (error) {
       logger.error('❌ Transcription process failed:', {
