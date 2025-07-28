@@ -19,7 +19,7 @@ class AudioService {
     // Default config (env-driven)
     // -------------------------
     const DEFAULT_UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
-    const DEFAULT_MAX_FILE_SIZE = process.env.UPLOAD_MAX_FILE_SIZE || '24MB';
+    const DEFAULT_MAX_FILE_SIZE = process.env.UPLOAD_MAX_FILE_SIZE || '200MB';
     const DEFAULT_MODEL = process.env.OPENAI_AUDIO_MODEL || 'whisper-1';
     const DEFAULT_SEGMENT_SECONDS = parseInt(process.env.TRANSCRIBE_SEGMENT_SECONDS || '600', 10); // 10 min
     const DEFAULT_BITRATE = process.env.TRANSCODE_BITRATE || '48k';

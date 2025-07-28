@@ -60,7 +60,7 @@ const audioFileFilter = (req, file, cb) => {
 const parseFileSize = (sizeString) => {
   const units = { B: 1, KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
   const match = sizeString.match(/^(\d+)\s*(B|KB|MB|GB)$/i);
-  if (!match) return 50 * 1024 * 1024; // Default 50MB
+  if (!match) return 200 * 1024 * 1024; // Default 200MB
   
   const [, value, unit] = match;
   return parseInt(value) * (units[unit.toUpperCase()] || 1);
