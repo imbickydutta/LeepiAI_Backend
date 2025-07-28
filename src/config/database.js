@@ -14,11 +14,14 @@ class Database {
     const options = {
       serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
-      keepAlive: true,
-      keepAliveInitialDelay: 300000,
       retryWrites: true,
       w: 'majority',
-      autoIndex: process.env.NODE_ENV !== 'production'
+      autoIndex: process.env.NODE_ENV !== 'production',
+      // Modern MongoDB driver options
+      maxPoolSize: 10,
+      minPoolSize: 5,
+      maxIdleTimeMS: 30000,
+      heartbeatFrequencyMS: 10000
     };
 
     // Debug environment variables
