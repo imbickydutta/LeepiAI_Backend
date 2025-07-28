@@ -1,22 +1,67 @@
+// audioService.js
+// Single-file AudioService with model selection, optional ffmpeg compression/segmentation,
+// dual-audio merge, word/segment timestamps (where supported), and SRT/VTT exporters.
+
 const OpenAI = require('openai');
 const fs = require('fs-extra');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const https = require('https');
+const { spawn } = require('child_process');
 const config = require('../config/env');
 const logger = require('../utils/logger');
 
 class AudioService {
-  constructor() {
-    // Initialize OpenAI client with better error handling
-    if (!config.apis.openai) {
-      logger.error('❌ OpenAI API key is missing. Audio transcription will not work.');
+  constructor(userConfig = {}) {
+    // -------------------------
+    // Default config (env-driven)
+    // -------------------------
+    const DEFAULT_UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
+    const DEFAULT_MAX_FILE_SIZE = process.env.UPLOAD_MAX_FILE_SIZE || '24MB';
+    const DEFAULT_MODEL = process.env.OPENAI_AUDIO_MODEL || 'whisper-1';
+    const DEFAULT_SEGMENT_SECONDS = parseInt(process.env.TRANSCRIBE_SEGMENT_SECONDS || '600', 10); // 10 min
+    const DEFAULT_BITRATE = process.env.TRANSCODE_BITRATE || '48k';
+
+    this.config = {
+      apis: {
+        openai: config.apis.openai || process.env.OPENAI_API_KEY || null
+      },
+      openai: {
+        audioModel: DEFAULT_MODEL
+      },
+      upload: {
+        dir: DEFAULT_UPLOAD_DIR,
+        maxFileSize: DEFAULT_MAX_FILE_SIZE,
+        allowedFormats: [
+          'wav', 'mp3', 'mp4', 'm4a', 'aac', 'flac', 'webm', 'ogg'
+        ]
+      },
+      transcode: {
+        enable: true,        // try to transcode if too large/unsupported
+        bitrate: DEFAULT_BITRATE,
+        sampleRate: 16000,   // target 16 kHz
+        channels: 1,         // mono
+      },
+      segment: {
+        enable: true,               // segment long files (requires ffmpeg)
+        seconds: DEFAULT_SEGMENT_SECONDS
+      },
+      ...userConfig
+    };
+
+    // Logger
+    this.logger = userConfig.logger || logger;
+
+    // OpenAI client
+    if (!this.config.apis.openai) {
+      this.logger.error('❌ OpenAI API key is missing. Audio transcription will not work.');
       this.openai = null;
     } else {
       this.openai = new OpenAI({
-        apiKey: config.apis.openai,
-        timeout: 120000, // Increase timeout to 2 minutes for large files
-        maxRetries: 5, // Increase retries
-        httpAgent: new (require('https').Agent)({
+        apiKey: this.config.apis.openai,
+        timeout: 120000, // 2 min
+        maxRetries: 5,
+        httpAgent: new https.Agent({
           keepAlive: true,
           keepAliveMsecs: 30000,
           maxSockets: 10,
@@ -24,273 +69,215 @@ class AudioService {
         })
       });
     }
-    
-    // Initialize upload configuration
-    this.uploadPath = path.join(__dirname, '../../uploads');
-    this.maxFileSize = this._parseFileSize(config.upload.maxFileSize);
-    this.allowedFormats = config.upload.allowedFormats;
-    
-    // Ensure upload directory exists
+
+    // Upload configuration
+    this.uploadPath = this.config.upload.dir;
+    this.maxFileSize = this._parseFileSize(this.config.upload.maxFileSize);
+    this.allowedFormats = this.config.upload.allowedFormats;
+
+    // Ensure upload dir
     fs.ensureDirSync(this.uploadPath);
-    
-    logger.info('🎵 AudioService initialized');
-    
-    // Test OpenAI API connection with warmup delay for cold start
+
+    this.logger.info('🎵 AudioService initialized');
+
+    // Warmup: verify OpenAI model availability after short delay
     if (this.openai) {
-      // Delay connection test to allow Railway container to warm up
       setTimeout(() => {
         this._testOpenAIConnection()
-          .then(() => {
-            logger.info('✅ OpenAI API connection verified');
+          .then(ok => {
+            if (ok) this.logger.info('✅ OpenAI API connection verified');
           })
-          .catch(error => {
-            logger.warn('⚠️ OpenAI API connection test failed (service will still work):', error.message);
+          .catch(err => {
+            this.logger.warn('⚠️ OpenAI API connection test failed (service may still work):', err?.message);
           });
-      }, 10000); // 10 second delay for Railway cold start
+      }, 5000);
     } else {
-      logger.error('❌ OpenAI API key is missing. Audio transcription features will not work.');
-      logger.info('💡 To fix this, add OPENAI_API_KEY to your Railway environment variables.');
+      this.logger.error('❌ OpenAI API key is missing. Transcription features disabled.');
     }
+
+    // Detect ffmpeg availability (lazy; cached)
+    this._ffmpegAvailable = null;
   }
 
-  /**
-   * Test OpenAI API connection
-   * @private
-   */
-  async _testOpenAIConnection() {
-    try {
-      // Try a simple models list call to test connection
-      const response = await this.openai.models.list();
-      logger.info('✅ OpenAI API connection successful');
-      return true;
-    } catch (error) {
-      logger.error('❌ OpenAI API connection test failed:', {
-        error: error.message,
-        type: error.constructor.name,
-        status: error.status
-      });
-      
-      // Don't throw error during startup, just log it
-      return false;
-    }
-  }
-
-  /**
-   * Upload and validate audio file
-   * @param {Object} file - Multer file object
-   * @returns {Promise<Object>} Upload result
-   */
+  // --------------------------------------------------
+  // Public: Upload & validate
+  // --------------------------------------------------
   async uploadAudio(file) {
     try {
-      // Validate file
       const validation = this._validateAudioFile(file);
       if (!validation.valid) {
-        return {
-          success: false,
-          error: validation.error
-        };
+        return { success: false, error: validation.error };
       }
 
-      // Generate unique filename
-      const fileExtension = path.extname(file.originalname);
-      const uniqueFilename = `${uuidv4()}${fileExtension}`;
-      const filePath = path.join(this.uploadPath, uniqueFilename);
+      const ext = path.extname(file.originalname);
+      const uniqueFilename = `${uuidv4()}${ext}`;
+      const destPath = path.join(this.uploadPath, uniqueFilename);
 
-      // Save file to disk
-      await fs.move(file.path, filePath);
+      await fs.move(file.path, destPath);
 
-      // Get file metadata
-      const fileStats = await fs.stat(filePath);
+      const stats = await fs.stat(destPath);
       const metadata = {
         originalName: file.originalname,
         filename: uniqueFilename,
-        path: filePath,
-        size: fileStats.size,
+        path: destPath,
+        size: stats.size,
         mimetype: file.mimetype,
         uploadedAt: new Date()
       };
 
-      logger.info('📁 Audio file uploaded', {
+      this.logger.info('📁 Audio file uploaded', {
         filename: uniqueFilename,
-        size: fileStats.size,
+        size: stats.size,
         originalName: file.originalname
       });
 
-      return {
-        success: true,
-        metadata
-      };
+      return { success: true, metadata };
     } catch (error) {
-      logger.error('❌ Audio upload failed:', error);
-      return {
-        success: false,
-        error: error.message
-      };
+      this.logger.error('❌ Audio upload failed:', error);
+      return { success: false, error: error.message };
     }
   }
 
-  /**
-   * Transcribe audio using OpenAI Whisper
-   * @param {string} audioFilePath - Path to audio file
-   * @param {Object} options - Transcription options
-   * @returns {Promise<Object>} Transcription result
-   */
+  // --------------------------------------------------
+  // Public: Transcribe single audio (auto-compress/segment if needed)
+  // --------------------------------------------------
   async transcribeAudio(audioFilePath, options = {}) {
     let fileStats = null;
-    
     try {
-      // Check if OpenAI is available
       if (!this.openai) {
-        throw new Error('OpenAI API is not configured. Please check your API key.');
+        throw new Error('OpenAI API is not configured. Please set OPENAI_API_KEY.');
       }
-
-      const {
-        language = 'en',
-        responseFormat = 'verbose_json',
-        timestampGranularities = ['word'],
-        temperature = 0
-      } = options;
-
-      // Validate file exists and size
       if (!await fs.pathExists(audioFilePath)) {
         throw new Error('Audio file not found');
       }
 
       fileStats = await fs.stat(audioFilePath);
-      const fileSizeMB = fileStats.size / (1024 * 1024);
-      
-      logger.info(`🔄 Starting Whisper transcription for ${fileSizeMB.toFixed(2)}MB file`);
+      const fileSizeMB = (fileStats.size / (1024 * 1024)).toFixed(2);
+      this.logger.info(`🔄 Starting transcription for ${fileSizeMB}MB file`);
 
-      // Create file read stream
-      const audioStream = fs.createReadStream(audioFilePath);
+      // Ensure suitable format/size: transcode if necessary (ffmpeg), then maybe segment
+      const prepared = await this._prepareAudioForTranscription(audioFilePath);
 
-      // Single transcription attempt with proper error handling
-      const transcription = await this.openai.audio.transcriptions.create({
-        file: audioStream,
-        model: 'whisper-1',
-        language,
-        response_format: responseFormat,
-        timestamp_granularities: timestampGranularities,
-        temperature
-      });
+      // If segmentation produced multiple files, transcribe sequentially and merge
+      if (prepared.type === 'segments') {
+        this.logger.info(`🧩 Transcribing ${prepared.files.length} segments...`);
+        let offset = 0;
+        const allSegments = [];
+        let fullText = '';
+        let language = 'en';
+        let totalDuration = 0;
 
-      logger.info('✅ Whisper transcription completed successfully');
-      return this._processTranscriptionResult(transcription);
+        for (const segPath of prepared.files) {
+          const res = await this._transcribeSingleFile(segPath, options);
+          if (!res.success) {
+            throw new Error(`Segment transcription failed: ${res.error}`);
+          }
+
+          // offset segments
+          const segs = (res.segments || []).map(s => ({
+            ...s,
+            start: (s.start || 0) + offset,
+            end: (s.end || 0) + offset
+          }));
+
+          allSegments.push(...segs);
+          if (res.text) {
+            if (fullText && !fullText.endsWith(' ')) fullText += ' ';
+            fullText += res.text;
+          }
+          language = res.language || language;
+          totalDuration = Math.max(totalDuration, offset + (res.duration || 0));
+
+          // Advance offset
+          offset += res.duration || this._estimateDurationFromText(res.text);
+        }
+
+        await this._cleanupTemp(prepared.tempDir);
+
+        this.logger.info('✅ Multi-segment transcription completed');
+
+        return {
+          success: true,
+          text: fullText,
+          segments: allSegments,
+          duration: totalDuration,
+          language
+        };
+      }
+
+      // Otherwise, single prepared file
+      const result = await this._transcribeSingleFile(prepared.file, options);
+      await this._cleanupTemp(prepared.tempDir);
+
+      if (!result.success) return result;
+
+      this.logger.info('✅ Transcription completed successfully');
+      return result;
 
     } catch (error) {
-      logger.error('❌ Transcription process failed:', {
+      this.logger.error('❌ Transcription process failed:', {
         error: error.message,
         file: audioFilePath,
         size: fileStats?.size || 'unknown'
       });
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
-  /**
-   * Transcribe dual audio streams (input and output)
-   * @param {string} inputAudioPath - Path to input audio
-   * @param {string} outputAudioPath - Path to output audio
-   * @returns {Promise<Object>} Dual transcription result
-   */
-  async transcribeDualAudio(inputAudioPath, outputAudioPath) {
+  // --------------------------------------------------
+  // Public: Transcribe dual audio (input & output), merge by timestamps
+  // --------------------------------------------------
+  async transcribeDualAudio(inputAudioPath, outputAudioPath, opts = {}) {
     try {
-      logger.info('🔄 Starting dual audio transcription', {
+      this.logger.info('🔄 Starting dual audio transcription', {
         hasInputAudio: !!inputAudioPath,
         hasOutputAudio: !!outputAudioPath
       });
 
-      // Validate input file
-      if (!inputAudioPath) {
-        throw new Error('Input audio file is required');
-      }
+      if (!inputAudioPath) throw new Error('Input audio file is required');
 
-      // Check if files exist and are readable
-      try {
-        await fs.access(inputAudioPath, fs.constants.R_OK);
-        if (outputAudioPath) {
-          await fs.access(outputAudioPath, fs.constants.R_OK);
-        }
-      } catch (error) {
-        logger.error('❌ Audio file access error:', {
-          error: error.message,
-          inputPath: inputAudioPath,
-          outputPath: outputAudioPath
-        });
-        throw new Error(`Audio file not accessible: ${error.message}`);
-      }
+      await fs.access(inputAudioPath, fs.constants.R_OK);
+      if (outputAudioPath) await fs.access(outputAudioPath, fs.constants.R_OK);
 
-      // Get file stats for logging
       const [inputStats, outputStats] = await Promise.all([
         fs.stat(inputAudioPath),
         outputAudioPath ? fs.stat(outputAudioPath) : null
       ]);
 
-      logger.info('📊 Audio file stats:', {
-        input: {
-          size: inputStats.size,
-          created: inputStats.birthtime,
-          modified: inputStats.mtime
-        },
-        output: outputStats ? {
-          size: outputStats.size,
-          created: outputStats.birthtime,
-          modified: outputStats.mtime
-        } : null
+      this.logger.info('📊 Audio file stats:', {
+        input: { size: inputStats.size, created: inputStats.birthtime, modified: inputStats.mtime },
+        output: outputStats ? { size: outputStats.size, created: outputStats.birthtime, modified: outputStats.mtime } : null
       });
 
-      // Transcribe both streams in parallel
-      logger.info('🎯 Starting transcription process');
-      
-      const transcriptionPromises = [this.transcribeAudio(inputAudioPath)];
-      if (outputAudioPath) {
-        transcriptionPromises.push(this.transcribeAudio(outputAudioPath));
+      // Transcribe in parallel
+      const [inputRes, outputRes] = await Promise.all([
+        this.transcribeAudio(inputAudioPath, opts),
+        outputAudioPath ? this.transcribeAudio(outputAudioPath, opts) : Promise.resolve(null)
+      ]);
+
+      if (!inputRes.success) throw new Error(`Input transcription failed: ${inputRes.error}`);
+      if (outputAudioPath && (!outputRes || !outputRes.success)) {
+        throw new Error(`Output transcription failed: ${outputRes?.error}`);
       }
 
-      const results = await Promise.all(transcriptionPromises);
-      const [inputResult, outputResult] = results;
+      const speakerMap = {
+        input: opts.inputLabel || 'user',
+        output: opts.outputLabel || 'interviewer'
+      };
 
-      if (!inputResult.success) {
-        logger.error('❌ Input audio transcription failed:', {
-          error: inputResult.error,
-          path: inputAudioPath
-        });
-        throw new Error(`Input audio transcription failed: ${inputResult.error}`);
-      }
-
-      if (outputAudioPath && (!outputResult || !outputResult.success)) {
-        logger.error('❌ Output audio transcription failed:', {
-          error: outputResult?.error,
-          path: outputAudioPath
-        });
-        throw new Error(`Output audio transcription failed: ${outputResult?.error}`);
-      }
-
-      // Tag segments with source
-      const inputSegments = inputResult.segments.map(segment => ({
-        ...segment,
-        source: 'input'
-      }));
-
+      const inputSegments = (inputRes.segments || []).map(s => ({ ...s, source: 'input', speaker: speakerMap.input }));
       let outputSegments = [];
-      if (outputResult && outputResult.success) {
-        outputSegments = outputResult.segments.map(segment => ({
-          ...segment,
-          source: 'output'
-        }));
+      if (outputRes && outputRes.success) {
+        outputSegments = (outputRes.segments || []).map(s => ({ ...s, source: 'output', speaker: speakerMap.output }));
       }
 
-      // Merge segments by timestamp
-      const mergedSegments = this._mergeSegmentsByTimestamp(inputSegments, outputSegments);
+      const mergedSegments = this._mergeSegmentsByTimestamp(inputSegments, outputSegments, { gapPause: true });
 
-      logger.info('✅ Dual transcription completed', {
+      this.logger.info('✅ Dual transcription completed', {
         inputSegments: inputSegments.length,
         outputSegments: outputSegments.length,
         mergedSegments: mergedSegments.length,
-        totalDuration: Math.max(inputResult.duration || 0, outputResult?.duration || 0)
+        totalDuration: Math.max(inputRes.duration || 0, outputRes?.duration || 0)
       });
 
       return {
@@ -298,13 +285,12 @@ class AudioService {
         inputSegments,
         outputSegments,
         mergedSegments,
-        inputText: inputResult.text,
-        outputText: outputResult?.text,
-        totalDuration: Math.max(inputResult.duration || 0, outputResult?.duration || 0)
+        inputText: inputRes.text,
+        outputText: outputRes?.text,
+        totalDuration: Math.max(inputRes.duration || 0, outputRes?.duration || 0)
       };
-
     } catch (error) {
-      logger.error('❌ Dual transcription failed:', {
+      this.logger.error('❌ Dual transcription failed:', {
         error: error.message,
         stack: error.stack,
         inputPath: inputAudioPath,
@@ -323,84 +309,154 @@ class AudioService {
     }
   }
 
-  /**
-   * Clean up temporary audio files
-   * @param {Array<string>} filePaths - Paths to clean up
-   * @returns {Promise<void>}
-   */
+  // --------------------------------------------------
+  // Public: Cleanup helper
+  // --------------------------------------------------
   async cleanupFiles(filePaths) {
     try {
-      for (const filePath of filePaths) {
-        if (await fs.pathExists(filePath)) {
-          await fs.remove(filePath);
-          logger.debug('🗑️ Cleaned up file:', filePath);
+      for (const p of filePaths) {
+        if (await fs.pathExists(p)) {
+          await fs.remove(p);
+          this.logger.debug('🗑️ Cleaned up file:', p);
         }
       }
     } catch (error) {
-      logger.warn('⚠️ Failed to cleanup some files:', error.message);
+      this.logger.warn('⚠️ Failed to cleanup some files:', error.message);
     }
   }
 
-  // =====================================================
-  // PRIVATE METHODS
-  // =====================================================
+  // --------------------------------------------------
+  // Public: Exporters (SRT/VTT)
+  // --------------------------------------------------
+  toSRT(segments = []) {
+    const fmt = n => this._formatSrtTime(n);
+    return segments.map((s, i) => {
+      const start = fmt(s.start || 0);
+      const end = fmt(s.end || (s.start || 0) + 2);
+      const speaker = s.speaker ? `[${s.speaker}] ` : '';
+      const text = (s.text || '').trim();
+      return `${i + 1}\n${start} --> ${end}\n${speaker}${text}\n`;
+    }).join('\n');
+  }
 
-  /**
-   * Validate audio file
-   * @param {Object} file - Multer file object
-   * @returns {Object} Validation result
-   */
+  toVTT(segments = []) {
+    const fmt = n => this._formatVttTime(n);
+    let out = 'WEBVTT\n\n';
+    segments.forEach((s, idx) => {
+      const start = fmt(s.start || 0);
+      const end = fmt(s.end || (s.start || 0) + 2);
+      const speaker = s.speaker ? `[${s.speaker}] ` : '';
+      const text = (s.text || '').trim();
+      out += `${idx + 1}\n${start} --> ${end}\n${speaker}${text}\n\n`;
+    });
+    return out;
+  }
+
+  // ====================================================
+  // PRIVATE
+  // ====================================================
+
+  async _testOpenAIConnection() {
+    try {
+      const model = this.config.openai.audioModel;
+      await this.openai.models.retrieve(model);
+      this.logger.info(`✅ Model "${model}" is retrievable`);
+      return true;
+    } catch (error) {
+      this.logger.error('❌ OpenAI connection test failed:', {
+        error: error.message,
+        type: error.constructor?.name,
+        status: error.status
+      });
+      return false;
+    }
+  }
+
   _validateAudioFile(file) {
-    // Check file size
+    if (!file) return { valid: false, error: 'No file provided' };
+
+    // Size
     if (file.size > this.maxFileSize) {
-      return {
-        valid: false,
-        error: `File too large. Maximum size is ${config.upload.maxFileSize}`
-      };
+      return { valid: false, error: `File too large. Maximum size is ${this.config.upload.maxFileSize}` };
     }
 
-    // Check file format
-    const fileExtension = path.extname(file.originalname).toLowerCase().substring(1);
-    if (!this.allowedFormats.includes(fileExtension)) {
-      return {
-        valid: false,
-        error: `Unsupported file format. Allowed formats: ${this.allowedFormats.join(', ')}`
-      };
+    // Extension allow-list
+    const ext = path.extname(file.originalname).toLowerCase().substring(1);
+    if (!this.allowedFormats.includes(ext)) {
+      return { valid: false, error: `Unsupported file format. Allowed: ${this.allowedFormats.join(', ')}` };
     }
 
-    // Check MIME type
+    // MIME allow-list (expanded)
     const allowedMimeTypes = [
       'audio/wav',
-      'audio/mpeg',
+      'audio/mpeg',      // mp3
       'audio/mp4',
+      'audio/x-m4a',
+      'audio/m4a',
+      'audio/aac',
       'audio/flac',
-      'audio/x-flac'
+      'audio/x-flac',
+      'audio/webm',
+      'audio/ogg',
+      'application/ogg'
     ];
-
     if (!allowedMimeTypes.includes(file.mimetype)) {
-      return {
-        valid: false,
-        error: 'Invalid audio file type'
-      };
+      return { valid: false, error: 'Invalid audio file type' };
     }
 
     return { valid: true };
   }
 
-  /**
-   * Process transcription result from OpenAI
-   * @param {Object} transcription - Raw transcription result
-   * @returns {Object} Processed result
-   */
+  async _transcribeSingleFile(audioFilePath, options = {}) {
+    try {
+      const {
+        model = this.config.openai.audioModel,
+        language = 'en',
+        responseFormat = 'verbose_json', // json|text|srt|vtt|verbose_json
+        timestampGranularities = ['word'], // 'word' incurs extra latency; 'segment' is cheaper
+        temperature = 0,
+        prompt
+      } = options;
+
+      const audioStream = fs.createReadStream(audioFilePath);
+
+      // Only send timestamp granularities if we believe model supports it well (conservative: Whisper)
+      const wantsWord = Array.isArray(timestampGranularities) && timestampGranularities.includes('word');
+      const supportsTimestampGranularities = model === 'whisper-1'; // safe assumption
+
+      const req = {
+        file: audioStream,
+        model,
+        language,
+        response_format: responseFormat,
+        temperature
+      };
+      if (prompt) req.prompt = prompt;
+
+      if (responseFormat === 'verbose_json' && supportsTimestampGranularities) {
+        req.timestamp_granularities = timestampGranularities;
+      } else if (responseFormat === 'verbose_json' && !supportsTimestampGranularities && wantsWord) {
+        this.logger.warn(`ℹ️ Model "${model}" may not return word-level timestamps; proceeding without 'word' granularity flag.`);
+      }
+
+      const transcription = await this.openai.audio.transcriptions.create(req);
+      const processed = this._processTranscriptionResult(transcription);
+
+      return { success: true, ...processed };
+    } catch (err) {
+      const friendly = this._mapOpenAIError(err);
+      return { success: false, error: friendly.hint || err.message, code: friendly.code, status: friendly.status };
+    }
+  }
+
   _processTranscriptionResult(transcription) {
     let segments = [];
-    
-    // Use segments if available, otherwise create from words or text
+    // Prefer explicit segments if provided
     if (transcription.segments && transcription.segments.length > 0) {
-      segments = transcription.segments.map(segment => ({
-        start: segment.start,
-        end: segment.end,
-        text: segment.text.trim()
+      segments = transcription.segments.map(s => ({
+        start: s.start,
+        end: s.end,
+        text: (s.text || '').trim()
       }));
     } else if (transcription.words && transcription.words.length > 0) {
       segments = this._groupWordsIntoSegments(transcription.words);
@@ -408,8 +464,7 @@ class AudioService {
       segments = this._createSegmentsFromText(transcription.text);
     }
 
-    // Calculate duration from segments or estimate
-    const duration = segments.length > 0 
+    const duration = segments.length > 0
       ? Math.max(...segments.map(s => s.end || 0))
       : this._estimateDurationFromText(transcription.text);
 
@@ -421,195 +476,257 @@ class AudioService {
     };
   }
 
-  /**
-   * Group words into sentence-level segments
-   * @param {Array} words - Word-level timestamps
-   * @returns {Array} Sentence segments
-   */
   _groupWordsIntoSegments(words) {
     const segments = [];
-    let currentSegment = null;
-    let segmentWords = [];
+    let current = null;
+    let bucket = [];
 
     for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-
-      if (!currentSegment) {
-        currentSegment = {
-          start: word.start,
-          end: word.end,
-          text: word.word
-        };
-        segmentWords = [word];
+      const w = words[i];
+      if (!current) {
+        current = { start: w.start, end: w.end, text: w.word };
+        bucket = [w];
       } else {
-        currentSegment.end = word.end;
-        currentSegment.text += ' ' + word.word;
-        segmentWords.push(word);
+        current.end = w.end;
+        current.text += ' ' + w.word;
+        bucket.push(w);
 
-        // Check for sentence boundaries
-        const isEndOfSentence = word.word.match(/[.!?]/) || 
-                               (i < words.length - 1 && words[i + 1].start - word.end > 1.0) ||
-                               segmentWords.length >= 20;
+        const gapNext = i < words.length - 1 ? (words[i + 1].start - w.end) : 0;
+        const boundary = /[.!?]/.test(w.word) || gapNext > 1.0 || bucket.length >= 20;
 
-        if (isEndOfSentence) {
-          segments.push({
-            start: currentSegment.start,
-            end: currentSegment.end,
-            text: currentSegment.text.trim()
-          });
-          currentSegment = null;
-          segmentWords = [];
+        if (boundary) {
+          segments.push({ start: current.start, end: current.end, text: current.text.trim() });
+          current = null;
+          bucket = [];
         }
       }
     }
-
-    // Add remaining segment
-    if (currentSegment) {
-      segments.push({
-        start: currentSegment.start,
-        end: currentSegment.end,
-        text: currentSegment.text.trim()
-      });
+    if (current) {
+      segments.push({ start: current.start, end: current.end, text: current.text.trim() });
     }
-
     return segments;
   }
 
-  /**
-   * Create segments from plain text (fallback)
-   * @param {string} text - Plain text
-   * @returns {Array} Text segments
-   */
   _createSegmentsFromText(text) {
     if (!text) return [];
-
     const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
-    const segments = [];
-    let currentTime = 0;
-
+    const segs = [];
+    let t = 0;
     sentences.forEach(sentence => {
-      const duration = Math.max(2, sentence.length * 0.05);
-      segments.push({
-        start: currentTime,
-        end: currentTime + duration,
-        text: sentence.trim()
-      });
-      currentTime += duration + 0.5;
+      const d = Math.max(2, sentence.length * 0.05);
+      segs.push({ start: t, end: t + d, text: sentence.trim() });
+      t += d + 0.5;
     });
-
-    return segments;
+    return segs;
   }
 
-  /**
-   * Merge segments from dual audio by timestamp
-   * @param {Array} inputSegments - Input audio segments
-   * @param {Array} outputSegments - Output audio segments
-   * @returns {Array} Merged segments
-   */
-  _mergeSegmentsByTimestamp(inputSegments, outputSegments) {
-    const allSegments = [...inputSegments, ...outputSegments];
-    
-    // Sort by start time
-    allSegments.sort((a, b) => (a.start || 0) - (b.start || 0));
-    
-    // Remove duplicates and merge overlapping segments
-    const deduplicated = this._removeDuplicateSegments(allSegments);
-    
-    return deduplicated;
+  _mergeSegmentsByTimestamp(inputSegments, outputSegments, opts = {}) {
+    const all = [...(inputSegments || []), ...(outputSegments || [])];
+    all.sort((a, b) => (a.start || 0) - (b.start || 0));
+
+    const dedup = this._removeDuplicateSegments(all);
+    if (!opts.gapPause) return dedup;
+
+    // Optionally inject [pause] markers for large gaps (readability)
+    const result = [];
+    const GAP_SEC = 1.2;
+    for (let i = 0; i < dedup.length; i++) {
+      const curr = dedup[i];
+      const prev = result[result.length - 1];
+      if (prev && (curr.start - prev.end) > GAP_SEC) {
+        result.push({ start: prev.end, end: curr.start, text: '[pause]' });
+      }
+      result.push(curr);
+    }
+    return result;
   }
 
-  /**
-   * Remove duplicate segments based on text similarity and timing
-   * @param {Array} segments - All segments
-   * @returns {Array} Deduplicated segments
-   */
   _removeDuplicateSegments(segments) {
     if (segments.length === 0) return segments;
+    const out = [];
+    const timeWindow = 2.0;
+    const threshold = 0.8;
 
-    const deduplicated = [];
-    const timeWindow = 2.0; // 2 seconds
-    const similarityThreshold = 0.8;
-
-    for (const segment of segments) {
-      let isDuplicate = false;
-
-      // Check against recent segments
-      for (let i = deduplicated.length - 1; i >= 0; i--) {
-        const existing = deduplicated[i];
-
-        if (Math.abs((segment.start || 0) - (existing.start || 0)) > timeWindow) {
-          break;
-        }
-
-        const similarity = this._calculateTextSimilarity(segment.text || '', existing.text || '');
-        if (similarity > similarityThreshold) {
-          isDuplicate = true;
-          break;
-        }
+    for (const seg of segments) {
+      let dup = false;
+      for (let i = out.length - 1; i >= 0; i--) {
+        const ex = out[i];
+        if (Math.abs((seg.start || 0) - (ex.start || 0)) > timeWindow) break;
+        const sim = this._textSim(seg.text || '', ex.text || '');
+        if (sim > threshold) { dup = true; break; }
       }
-
-      if (!isDuplicate) {
-        deduplicated.push(segment);
-      }
+      if (!dup) out.push(seg);
     }
-
-    return deduplicated;
+    return out;
   }
 
-  /**
-   * Calculate text similarity (Jaccard similarity)
-   * @param {string} text1 - First text
-   * @param {string} text2 - Second text
-   * @returns {number} Similarity score (0-1)
-   */
-  _calculateTextSimilarity(text1, text2) {
-    if (!text1 || !text2) return 0;
-
-    const words1 = new Set(text1.toLowerCase().split(/\s+/));
-    const words2 = new Set(text2.toLowerCase().split(/\s+/));
-
-    const intersection = new Set([...words1].filter(x => words2.has(x)));
-    const union = new Set([...words1, ...words2]);
-
-    return intersection.size / union.size;
+  _textSim(a, b) {
+    if (!a || !b) return 0;
+    const s1 = new Set(a.toLowerCase().split(/\s+/));
+    const s2 = new Set(b.toLowerCase().split(/\s+/));
+    const inter = new Set([...s1].filter(x => s2.has(x)));
+    const uni = new Set([...s1, ...s2]);
+    return inter.size / uni.size;
   }
 
-  /**
-   * Estimate duration from text length
-   * @param {string} text - Text content
-   * @returns {number} Estimated duration in seconds
-   */
   _estimateDurationFromText(text) {
     if (!text) return 0;
-    const words = text.split(/\s+/).length;
-    const wordsPerSecond = 2.5; // Average speaking rate
-    return Math.ceil(words / wordsPerSecond);
+    const words = text.trim().split(/\s+/).length;
+    const wps = 2.5;
+    return Math.ceil(words / wps);
   }
 
-  /**
-   * Parse file size string to bytes
-   * @param {string} sizeString - Size string (e.g., '50MB')
-   * @returns {number} Size in bytes
-   */
+  _formatSrtTime(sec) {
+    const ms = Math.floor((sec % 1) * 1000);
+    const s = Math.floor(sec) % 60;
+    const m = Math.floor(sec / 60) % 60;
+    const h = Math.floor(sec / 3600);
+    const pad = (n, z = 2) => String(n).padStart(z, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)},${String(ms).padStart(3, '0')}`;
+  }
+
+  _formatVttTime(sec) {
+    const ms = Math.floor((sec % 1) * 1000);
+    const s = Math.floor(sec) % 60;
+    const m = Math.floor(sec / 60) % 60;
+    const h = Math.floor(sec / 3600);
+    const pad = (n, z = 2) => String(n).padStart(z, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)}.${String(ms).padStart(3, '0')}`;
+  }
+
   _parseFileSize(sizeString) {
     const units = { B: 1, KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
-    const match = sizeString.match(/^(\d+)\s*(B|KB|MB|GB)$/i);
-    if (!match) return 50 * 1024 * 1024; // Default 50MB
-    
+    const match = String(sizeString || '').trim().match(/^(\d+)\s*(B|KB|MB|GB)$/i);
+    if (!match) return 24 * 1024 * 1024; // default 24MB
     const [, value, unit] = match;
-    return parseInt(value) * (units[unit.toUpperCase()] || 1);
+    return parseInt(value, 10) * (units[unit.toUpperCase()] || 1);
   }
 
-  /**
-   * Compress audio file (placeholder - would need ffmpeg or similar)
-   * @param {string} inputPath - Input file path
-   * @returns {Promise<string>} Compressed file path
-   */
-  async _compressAudioFile(inputPath) {
-    // For now, just return the original path
-    // In production, implement audio compression using ffmpeg
-    logger.warn('⚠️ Audio compression not implemented - using original file');
-    return inputPath;
+  _mapOpenAIError(err) {
+    const status = err?.status || err?.response?.status;
+    const type = err?.constructor?.name;
+    let hint = err?.message || 'Unknown error';
+    let code = 'UNKNOWN';
+
+    if (status === 400) { code = 'BAD_REQUEST'; hint = 'Invalid parameters or unsupported media. Try transcoding to m4a/mp3 and retry.'; }
+    else if (status === 401) { code = 'UNAUTHORIZED'; hint = 'Invalid API key.'; }
+    else if (status === 403) { code = 'FORBIDDEN'; hint = 'This model may not be available on your project.'; }
+    else if (status === 404) { code = 'NOT_FOUND'; hint = 'Endpoint/model not found. Check model name.'; }
+    else if (status === 413) { code = 'PAYLOAD_TOO_LARGE'; hint = 'File too large. Consider transcoding or segmenting the file.'; }
+    else if (status === 429) { code = 'RATE_LIMIT'; hint = 'Rate limited. Back off and retry using Retry-After header.'; }
+    else if (status >= 500) { code = 'SERVER_ERROR'; hint = 'Temporary server issue. Retry with backoff.'; }
+
+    this.logger.error('OpenAI error:', { status, type, code, hint });
+    return { status, type, code, hint };
+  }
+
+  // ----------------------------
+  // Prep audio: transcode/segment
+  // ----------------------------
+  async _prepareAudioForTranscription(inputPath) {
+    const tempDir = path.join(this.uploadPath, `.tmp-${uuidv4()}`);
+    await fs.ensureDir(tempDir);
+
+    const stats = await fs.stat(inputPath);
+    const withinLimit = stats.size <= this.maxFileSize;
+
+    // If within size limit, keep as-is
+    if (withinLimit) {
+      return { type: 'single', file: inputPath, tempDir };
+    }
+
+    // Try transcode (if ffmpeg present)
+    if (await this._hasFfmpeg() && this.config.transcode.enable) {
+      const transcoded = await this._transcodeAudio(inputPath, path.join(tempDir, `${uuidv4()}.m4a`));
+      const tStats = await fs.stat(transcoded);
+      if (tStats.size <= this.maxFileSize) {
+        return { type: 'single', file: transcoded, tempDir };
+      }
+
+      // If still too big and segmentation enabled: split into chunks
+      if (this.config.segment.enable) {
+        const parts = await this._segmentAudio(transcoded, tempDir, this.config.segment.seconds);
+        return { type: 'segments', files: parts, tempDir };
+      }
+      return { type: 'single', file: transcoded, tempDir }; // fallback
+    }
+
+    // If no ffmpeg, proceed but warn
+    this.logger.warn('⚠️ ffmpeg not available; proceeding with original file (may exceed API limits).');
+    return { type: 'single', file: inputPath, tempDir };
+  }
+
+  async _hasFfmpeg() {
+    if (this._ffmpegAvailable !== null) return this._ffmpegAvailable;
+    this._ffmpegAvailable = await new Promise(resolve => {
+      const p = spawn('ffmpeg', ['-version']);
+      let ok = true;
+      p.on('error', () => resolve(false));
+      p.on('exit', code => resolve(code === 0 && ok));
+    });
+    return this._ffmpegAvailable;
+  }
+
+  async _transcodeAudio(input, output) {
+    this.logger.info('🎛️ Transcoding audio (mono, 16kHz)...');
+    await this._runFfmpeg([
+      '-y',
+      '-i', input,
+      '-ac', String(this.config.transcode.channels),
+      '-ar', String(this.config.transcode.sampleRate),
+      '-b:a', this.config.transcode.bitrate,
+      '-vn',
+      output
+    ]);
+    this.logger.info('✅ Transcode done:', output);
+    return output;
+  }
+
+  async _segmentAudio(input, outDir, seconds = 600) {
+    this.logger.info(`✂️  Segmenting audio into ~${seconds}s chunks...`);
+    const pattern = path.join(outDir, 'chunk-%03d.m4a');
+    await this._runFfmpeg([
+      '-y',
+      '-i', input,
+      '-f', 'segment',
+      '-segment_time', String(seconds),
+      '-reset_timestamps', '1',
+      '-ac', String(this.config.transcode.channels),
+      '-ar', String(this.config.transcode.sampleRate),
+      '-b:a', this.config.transcode.bitrate,
+      '-vn',
+      pattern
+    ]);
+
+    // Collect chunk files (sorted)
+    const files = (await fs.readdir(outDir))
+      .filter(f => f.startsWith('chunk-') && f.endsWith('.m4a'))
+      .map(f => path.join(outDir, f))
+      .sort();
+    this.logger.info(`✅ Segmentation produced ${files.length} chunks`);
+    return files;
+  }
+
+  async _runFfmpeg(args) {
+    return new Promise((resolve, reject) => {
+      const p = spawn('ffmpeg', args, { stdio: 'ignore' });
+      p.on('error', reject);
+      p.on('exit', code => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited with code ${code}`));
+      });
+    });
+  }
+
+  async _cleanupTemp(tempDir) {
+    try {
+      if (tempDir && tempDir.includes(`${path.sep}.tmp-`) && await fs.pathExists(tempDir)) {
+        await fs.remove(tempDir);
+        this.logger.debug('🧹 Temp cleaned:', tempDir);
+      }
+    } catch (e) {
+      this.logger.warn('⚠️ Temp cleanup failed:', e.message);
+    }
   }
 }
 
