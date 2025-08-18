@@ -785,6 +785,61 @@ class AudioService {
       this.logger.warn('⚠️ Temp cleanup failed:', e.message);
     }
   }
+
+  // --------------------------------------------------
+  // Public: File management
+  // --------------------------------------------------
+
+  /**
+   * Delete an audio file from storage
+   * @param {string} filePath - Path to the audio file
+   * @returns {Promise<Object>} Delete result
+   */
+  async deleteAudioFile(filePath) {
+    try {
+      if (!filePath) {
+        return { success: false, error: 'No file path provided' };
+      }
+
+      // Check if file exists
+      if (!await fs.pathExists(filePath)) {
+        this.logger.warn(`⚠️ File not found for deletion: ${filePath}`);
+        return { success: true, message: 'File already deleted' };
+      }
+
+      // Get file stats before deletion
+      const stats = await fs.stat(filePath);
+      
+      // Delete the file
+      await fs.unlink(filePath);
+      
+      this.logger.info('🗑️ Audio file deleted successfully', {
+        path: filePath,
+        size: stats.size,
+        deletedAt: new Date()
+      });
+
+      return { 
+        success: true, 
+        message: 'Audio file deleted successfully',
+        deletedSize: stats.size
+      };
+    } catch (error) {
+      this.logger.error('❌ Failed to delete audio file:', {
+        path: filePath,
+        error: error.message
+      });
+      
+      return { 
+        success: false, 
+        error: `Failed to delete audio file: ${error.message}` 
+      };
+    }
+  }
+
+  // --------------------------------------------------
+  // Private: Utility methods
+  // --------------------------------------------------
 }
 
 module.exports = new AudioService(); 

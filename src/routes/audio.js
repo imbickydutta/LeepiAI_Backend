@@ -25,6 +25,41 @@ router.post('/upload',
       const transcriptionResult = await audioService.transcribeAudio(req.file.path);
 
       if (!transcriptionResult.success) {
+        // Save failed recording for retry
+        try {
+          await databaseService.saveRecording({
+            userId: req.user.id,
+            title: req.file.originalname || 'Failed Audio Recording',
+            status: 'failed',
+            audioFiles: [{
+              path: req.file.path,
+              originalName: req.file.originalname,
+              filename: req.file.filename,
+              size: req.file.size,
+              mimetype: req.file.mimetype,
+              type: 'input'
+            }],
+            metadata: {
+              recordingType: 'single',
+              hasInputAudio: true,
+              hasOutputAudio: false,
+              sources: ['input'],
+              language: 'en',
+              originalFilename: req.file.originalname,
+              fileSize: req.file.size
+            },
+            error: transcriptionResult.error
+          });
+          
+          logger.info('💾 Failed recording saved for retry', {
+            userId: req.user.id,
+            originalFilename: req.file.originalname,
+            error: transcriptionResult.error
+          });
+        } catch (saveError) {
+          logger.error('❌ Failed to save failed recording:', saveError);
+        }
+
         await cleanupFiles(filesToCleanup);
         return res.status(400).json({
           success: false,
@@ -61,6 +96,37 @@ router.post('/upload',
         }
       });
 
+      // Save successful recording
+      try {
+        await databaseService.saveRecording({
+          userId: req.user.id,
+          title: req.file.originalname || 'Audio Recording',
+          status: 'completed',
+          audioFiles: [{
+            path: req.file.path,
+            originalName: req.file.originalname,
+            filename: req.file.filename,
+            size: req.file.size,
+            mimetype: req.file.mimetype,
+            type: 'input'
+          }],
+          transcriptId: savedTranscript.id,
+          metadata: {
+            duration: transcriptionResult.duration,
+            segmentCount: transcriptionResult.segments.length,
+            recordingType: 'single',
+            hasInputAudio: true,
+            hasOutputAudio: false,
+            sources: ['input'],
+            language: transcriptionResult.language || 'en',
+            originalFilename: req.file.originalname,
+            fileSize: req.file.size
+          }
+        });
+      } catch (saveError) {
+        logger.error('❌ Failed to save successful recording:', saveError);
+      }
+
       // Clean up temporary files
       await cleanupFiles(filesToCleanup);
 
@@ -78,6 +144,41 @@ router.post('/upload',
       });
 
     } catch (error) {
+      // Save failed recording for retry
+      try {
+        await databaseService.saveRecording({
+          userId: req.user.id,
+          title: req.file.originalname || 'Failed Audio Recording',
+          status: 'failed',
+          audioFiles: [{
+            path: req.file.path,
+            originalName: req.file.originalname,
+            filename: req.file.filename,
+            size: req.file.size,
+            mimetype: req.file.mimetype,
+            type: 'input'
+          }],
+          metadata: {
+            recordingType: 'single',
+            hasInputAudio: true,
+            hasOutputAudio: false,
+            sources: ['input'],
+            language: 'en',
+            originalFilename: req.file.originalname,
+            fileSize: req.file.size
+          },
+          error: error.message
+        });
+        
+        logger.info('💾 Failed recording saved for retry', {
+          userId: req.user.id,
+          originalFilename: req.file.originalname,
+          error: error.message
+        });
+      } catch (saveError) {
+        logger.error('❌ Failed to save failed recording:', saveError);
+      }
+
       await cleanupFiles(filesToCleanup);
       throw error;
     }
@@ -254,10 +355,36 @@ router.post('/upload-segmented-dual',
       if (microphone) filesToCleanup.push(...microphone);
       if (system) filesToCleanup.push(...system);
 
+      // Generate session ID for this recording session
+      const sessionId = `session_${Date.now()}_${req.user.id}`;
+      
+      // Create parent session for this segmented recording
+      const parentSession = await databaseService.createParentSession({
+        userId: req.user.id,
+        sessionId: sessionId,
+        title: `Segmented Dual Audio Recording - ${new Date().toISOString().split('T')[0]}`,
+        metadata: {
+          totalSegments: microphone.length,
+          recordingType: 'segmented',
+          hasInputAudio: true,
+          hasOutputAudio: !!system && system.length > 0,
+          sources: ['input', 'output'].filter(source => 
+            (source === 'input' && microphone) || (source === 'output' && system)
+          ),
+          language: 'en',
+          originalFilename: `segmented-recording-${microphone.length}-segments`,
+          fileSize: 0, // Will be calculated as chunks are added
+          totalFileSize: 0,
+          sessionStartTime: new Date()
+        }
+      });
+
       // Process each segment pair
       const allSegments = [];
       let totalDuration = 0;
       let currentTimeOffset = 0;
+      let successfulChunks = 0;
+      let failedChunks = 0;
 
       for (let i = 0; i < microphone.length; i++) {
         const micFile = microphone[i];
@@ -273,46 +400,185 @@ router.post('/upload-segmented-dual',
             name: sysFile.originalname,
             size: sysFile.size,
             path: sysFile.path
-          } : null
+          } : null,
+          sessionId: sessionId,
+          segmentIndex: i
         });
 
-        // Process dual audio for this segment
-        const transcriptionResult = await audioService.transcribeDualAudio(
-          micFile.path,
-          sysFile?.path || null
-        );
+        try {
+          // Process dual audio for this segment
+          const transcriptionResult = await audioService.transcribeDualAudio(
+            micFile.path,
+            sysFile?.path || null
+          );
 
-        if (!transcriptionResult.success) {
-          logger.error(`❌ Transcription failed for segment ${i + 1}:`, {
-            error: transcriptionResult.error,
+          if (!transcriptionResult.success) {
+            logger.error(`❌ Transcription failed for segment ${i + 1}:`, {
+              error: transcriptionResult.error,
+              userId: req.user.id,
+              microphonePath: micFile.path,
+              systemPath: sysFile?.path,
+              sessionId: sessionId,
+              segmentIndex: i
+            });
+
+            // Save failed chunk for retry
+            await databaseService.addChunkToSession(parentSession.id, {
+              userId: req.user.id,
+              sessionId: sessionId,
+              title: `Segment ${i + 1} - Failed`,
+              status: 'failed',
+              audioFiles: [
+                {
+                  path: micFile.path,
+                  originalName: micFile.originalname,
+                  filename: micFile.filename,
+                  size: micFile.size,
+                  mimetype: micFile.mimetype,
+                  type: 'input',
+                  segmentIndex: i
+                },
+                ...(sysFile ? [{
+                  path: sysFile.path,
+                  originalName: sysFile.originalname,
+                  filename: sysFile.filename,
+                  size: sysFile.size,
+                  mimetype: sysFile.mimetype,
+                  type: 'output',
+                  segmentIndex: i
+                }] : [])
+              ],
+              metadata: {
+                segmentIndex: i,
+                recordingType: 'segmented',
+                hasInputAudio: true,
+                hasOutputAudio: !!sysFile,
+                sources: ['input', 'output'].filter(source => 
+                  (source === 'input') || (source === 'output' && sysFile)
+                ),
+                language: 'en',
+                originalFilename: `segment-${i + 1}`,
+                fileSize: micFile.size + (sysFile?.size || 0)
+              },
+              error: transcriptionResult.error
+            });
+
+            failedChunks++;
+            continue; // Skip to next segment
+          }
+
+          // Save successful chunk
+          await databaseService.addChunkToSession(parentSession.id, {
             userId: req.user.id,
-            microphonePath: micFile.path,
-            systemPath: sysFile?.path
+            sessionId: sessionId,
+            title: `Segment ${i + 1} - Success`,
+            status: 'completed',
+            audioFiles: [
+              {
+                path: micFile.path,
+                originalName: micFile.originalname,
+                filename: micFile.filename,
+                size: micFile.size,
+                mimetype: micFile.mimetype,
+                type: 'input',
+                segmentIndex: i
+              },
+              ...(sysFile ? [{
+                path: sysFile.path,
+                originalName: sysFile.originalname,
+                filename: sysFile.filename,
+                size: sysFile.size,
+                mimetype: sysFile.mimetype,
+                type: 'output',
+                segmentIndex: i
+              }] : [])
+            ],
+            metadata: {
+              segmentIndex: i,
+              recordingType: 'segmented',
+              duration: transcriptionResult.totalDuration,
+              hasInputAudio: true,
+              hasOutputAudio: !!sysFile,
+              sources: ['input', 'output'].filter(source => 
+                (source === 'input') || (source === 'output' && sysFile)
+              ),
+              language: transcriptionResult.language || 'en',
+              originalFilename: `segment-${i + 1}`,
+              fileSize: micFile.size + (sysFile?.size || 0)
+            }
           });
 
-          await cleanupFiles(filesToCleanup);
-          return res.status(400).json({
-            success: false,
-            error: `Segment ${i + 1} transcription failed: ${transcriptionResult.error}`
+          // Adjust timestamps for this segment
+          const adjustedSegments = transcriptionResult.mergedSegments.map(segment => ({
+            ...segment,
+            start: segment.start + currentTimeOffset,
+            end: segment.end + currentTimeOffset
+          }));
+
+          allSegments.push(...adjustedSegments);
+          totalDuration += transcriptionResult.totalDuration;
+          currentTimeOffset += transcriptionResult.totalDuration;
+          successfulChunks++;
+
+          logger.info(`✅ Segment ${i + 1} processed successfully`, {
+            segmentDuration: transcriptionResult.totalDuration,
+            segmentSegments: transcriptionResult.mergedSegments.length,
+            currentTimeOffset,
+            sessionId: sessionId,
+            segmentIndex: i
           });
+
+        } catch (segmentError) {
+          logger.error(`❌ Unexpected error processing segment ${i + 1}:`, {
+            error: segmentError.message,
+            userId: req.user.id,
+            sessionId: sessionId,
+            segmentIndex: i
+          });
+
+          // Save failed chunk for retry
+          await databaseService.addChunkToSession(parentSession.id, {
+            userId: req.user.id,
+            sessionId: sessionId,
+            title: `Segment ${i + 1} - Error`,
+            status: 'failed',
+            audioFiles: [
+              {
+                path: micFile.path,
+                originalName: micFile.originalname,
+                filename: micFile.filename,
+                size: micFile.size,
+                mimetype: micFile.mimetype,
+                type: 'input',
+                segmentIndex: i
+              },
+              ...(sysFile ? [{
+                path: sysFile.path,
+                originalName: sysFile.originalname,
+                filename: sysFile.filename,
+                size: sysFile.size,
+                mimetype: sysFile.mimetype,
+                type: 'output',
+                segmentIndex: i
+              }] : [])
+            ],
+            metadata: {
+              segmentIndex: i,
+              recordingType: 'segmented',
+              hasInputAudio: true,
+              hasOutputAudio: !!sysFile,
+              sources: ['input', 'output'].filter(source => 
+                (source === 'input') || (source === 'output' && sysFile)
+              ),
+              language: 'en',
+              originalFilename: `segment-${i + 1}`,
+              fileSize: micFile.size + (sysFile?.size || 0)
+            },
+            error: segmentError.message
+          });
+
+          failedChunks++;
         }
-
-        // Adjust timestamps for this segment
-        const adjustedSegments = transcriptionResult.mergedSegments.map(segment => ({
-          ...segment,
-          start: segment.start + currentTimeOffset,
-          end: segment.end + currentTimeOffset
-        }));
-
-        allSegments.push(...adjustedSegments);
-        totalDuration += transcriptionResult.totalDuration;
-        currentTimeOffset += transcriptionResult.totalDuration;
-
-        logger.info(`✅ Segment ${i + 1} processed successfully`, {
-          segmentDuration: transcriptionResult.totalDuration,
-          segmentSegments: transcriptionResult.mergedSegments.length,
-          currentTimeOffset
-        });
       }
 
       // Filter out segments with empty text to prevent validation errors
@@ -321,15 +587,20 @@ router.post('/upload-segmented-dual',
       );
 
       if (validSegments.length === 0) {
-        logger.warn('⚠️ No valid segments found after filtering empty text');
+        // Update parent session status to failed
+        await databaseService.updateRecording(parentSession.id, {
+          status: 'failed',
+          error: 'No valid segments were processed'
+        });
+
         await cleanupFiles(filesToCleanup);
         return res.status(400).json({
           success: false,
-          error: 'No valid transcription segments found'
+          error: 'No valid segments were processed'
         });
       }
 
-      // Format transcript content from all merged segments
+      // Create transcript from all segments
       const transcript = validSegments.map((segment, index) => {
         const sourceLabel = segment.source === 'input' ? 'MIC' : 'SYS';
         const startTime = typeof segment.start === 'number' ? segment.start.toFixed(1) : '0.0';
@@ -338,7 +609,7 @@ router.post('/upload-segmented-dual',
         return `${sourceLabel} ${timeLabel}: ${text}`;
       }).join('\n');
 
-      // Save to database
+      // Save transcript
       const savedTranscript = await databaseService.saveTranscript({
         userId: req.user.id,
         title: `Segmented Dual Audio Recording - ${new Date().toISOString().split('T')[0]}`,
@@ -347,8 +618,9 @@ router.post('/upload-segmented-dual',
         metadata: {
           duration: totalDuration,
           segmentCount: validSegments.length,
-          hasInputAudio: !!microphone,
-          hasOutputAudio: !!system,
+          totalSegments: microphone.length,
+          hasInputAudio: true,
+          hasOutputAudio: !!system && system.length > 0,
           sources: ['input', 'output'].filter(source => 
             (source === 'input' && microphone) || (source === 'output' && system)
           ),
@@ -357,8 +629,22 @@ router.post('/upload-segmented-dual',
           fileSize: microphone.reduce((sum, file) => sum + file.size, 0) + 
                    (system ? system.reduce((sum, file) => sum + file.size, 0) : 0),
           isSegmented: true,
-          totalSegments: microphone.length,
-          segmentDuration: 60 // 1 minute segments
+          sessionId: sessionId
+        }
+      });
+
+      // Update parent session with transcript and final status
+      const finalStatus = failedChunks === 0 ? 'completed' : 'completed_with_errors';
+      await databaseService.updateRecording(parentSession.id, {
+        status: finalStatus,
+        transcriptId: savedTranscript.id,
+        completedAt: new Date(),
+        metadata: {
+          ...parentSession.metadata,
+          sessionEndTime: new Date(),
+          totalDuration: totalDuration,
+          successfulChunks: successfulChunks,
+          failedChunks: failedChunks
         }
       });
 
@@ -367,33 +653,41 @@ router.post('/upload-segmented-dual',
 
       logger.info('🎵 Segmented dual audio processed successfully', {
         userId: req.user.id,
+        sessionId: sessionId,
         transcriptId: savedTranscript.id,
+        totalDuration: totalDuration,
         totalSegments: microphone.length,
-        totalDuration,
-        totalSegmentCount: allSegments.length
+        successfulChunks: successfulChunks,
+        failedChunks: failedChunks,
+        validSegments: validSegments.length
       });
 
       res.json({
         success: true,
         message: 'Segmented dual audio processed successfully',
-        transcript: savedTranscript
+        transcript: savedTranscript,
+        session: {
+          id: parentSession.id,
+          sessionId: sessionId,
+          status: finalStatus,
+          totalSegments: microphone.length,
+          successfulChunks: successfulChunks,
+          failedChunks: failedChunks,
+          totalDuration: totalDuration
+        }
       });
 
     } catch (error) {
       logger.error('❌ Segmented dual audio processing failed:', {
         error: error.message,
-        stack: error.stack,
         userId: req.user.id,
-        files: req.files
+        stack: error.stack
       });
 
+      // Clean up temporary files
       await cleanupFiles(filesToCleanup);
       
-      res.status(500).json({
-        success: false,
-        error: error.message,
-        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
+      throw error;
     }
   })
 );

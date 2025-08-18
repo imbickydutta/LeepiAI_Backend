@@ -899,6 +899,458 @@ class DatabaseService {
   }
 
   // =====================================================
+  // RECORDING MANAGEMENT
+  // =====================================================
+
+  /**
+   * Save a new recording with session management
+   * @param {Object} recordingData - Recording data
+   * @returns {Promise<Object>} Saved recording
+   */
+  async saveRecording(recordingData) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const recording = new Recording({
+        ...recordingData,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      await recording.save();
+      
+      logger.info('💾 Recording saved successfully', {
+        recordingId: recording.id,
+        userId: recordingData.userId,
+        sessionId: recordingData.sessionId,
+        isParentSession: recordingData.isParentSession
+      });
+
+      return recording;
+    } catch (error) {
+      logger.error('❌ Failed to save recording:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a parent session for segmented recordings
+   * @param {Object} sessionData - Session data
+   * @returns {Promise<Object>} Created parent session
+   */
+  async createParentSession(sessionData) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const parentSession = new Recording({
+        ...sessionData,
+        isParentSession: true,
+        status: 'pending',
+        metadata: {
+          ...sessionData.metadata,
+          recordingType: 'segmented',
+          sessionStartTime: new Date()
+        },
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      await parentSession.save();
+      
+      logger.info('💾 Parent session created successfully', {
+        sessionId: parentSession.sessionId,
+        userId: sessionData.userId,
+        totalSegments: sessionData.metadata?.totalSegments
+      });
+
+      return parentSession;
+    } catch (error) {
+      logger.error('❌ Failed to create parent session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add a chunk recording to a parent session
+   * @param {string} parentSessionId - Parent session ID
+   * @param {Object} chunkData - Chunk recording data
+   * @returns {Promise<Object>} Saved chunk recording
+   */
+  async addChunkToSession(parentSessionId, chunkData) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      // Get parent session
+      const parentSession = await Recording.findById(parentSessionId);
+      if (!parentSession) {
+        throw new Error('Parent session not found');
+      }
+
+      // Create chunk recording
+      const chunkRecording = new Recording({
+        ...chunkData,
+        isParentSession: false,
+        parentSessionId: parentSession.sessionId,
+        parentRecordingId: parentSessionId,
+        status: 'pending',
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+
+      await chunkRecording.save();
+
+      // Add chunk to parent session
+      await parentSession.addChunkRecording(chunkRecording.id);
+
+      // Update parent session metadata
+      const totalSegments = parentSession.chunkRecordingIds.length;
+      const totalFileSize = (parentSession.metadata?.totalFileSize || 0) + (chunkData.metadata?.fileSize || 0);
+      
+      await parentSession.updateSessionMetadata({
+        totalSegments,
+        totalFileSize,
+        currentSegment: totalSegments
+      });
+
+      logger.info('💾 Chunk added to session successfully', {
+        chunkId: chunkRecording.id,
+        parentSessionId: parentSessionId,
+        totalSegments,
+        totalFileSize
+      });
+
+      return chunkRecording;
+    } catch (error) {
+      logger.error('❌ Failed to add chunk to session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get user's recordings with session grouping
+   * @param {string} userId - User ID
+   * @param {Object} options - Query options
+   * @returns {Promise<Array>} List of recordings grouped by session
+   */
+  async getUserRecordings(userId, options = {}) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const {
+        limit = 20,
+        offset = 0,
+        status,
+        sortBy = 'createdAt',
+        sortOrder = -1,
+        groupBySession = true
+      } = options;
+
+      if (groupBySession) {
+        // Get parent sessions (grouped recordings)
+        const parentSessions = await Recording.getParentSessions(userId);
+        
+        // Apply filtering and sorting
+        let filteredSessions = parentSessions;
+        if (status) {
+          filteredSessions = filteredSessions.filter(session => session.status === status);
+        }
+        
+        // Sort and paginate
+        filteredSessions.sort((a, b) => {
+          const aValue = a[sortBy];
+          const bValue = b[sortBy];
+          return sortOrder === -1 ? 
+            (bValue > aValue ? 1 : -1) : 
+            (aValue > bValue ? 1 : -1);
+        });
+        
+        const paginatedSessions = filteredSessions.slice(offset, offset + limit);
+        
+        // Format response with session details
+        const recordings = await Promise.all(paginatedSessions.map(async (session) => {
+          const chunks = await Recording.find({ 
+            _id: { $in: session.chunkRecordingIds } 
+          }).sort({ 'metadata.currentSegment': 1 });
+
+          return {
+            id: session._id,
+            sessionId: session.sessionId,
+            title: session.title,
+            status: session.status,
+            isParentSession: true,
+            audioFiles: chunks.flatMap(chunk => chunk.audioFiles || []),
+            transcriptId: session.transcriptId?._id,
+            transcript: session.transcriptId,
+            metadata: {
+              ...session.metadata,
+              totalChunks: chunks.length,
+              chunkStatuses: chunks.map(chunk => ({
+                id: chunk._id,
+                status: chunk.status,
+                segmentIndex: chunk.metadata?.segmentIndex,
+                error: chunk.error
+              }))
+            },
+            error: session.error,
+            retryCount: session.retryCount || 0,
+            lastRetryAt: session.lastRetryAt,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            completedAt: session.completedAt,
+            audioDeletedAt: session.audioDeletedAt
+          };
+        }));
+
+        return recordings;
+      } else {
+        // Get individual recordings (legacy mode)
+        const query = { userId };
+        if (status) {
+          query.status = status;
+        }
+
+        const recordings = await Recording.find(query)
+          .sort({ [sortBy]: sortOrder })
+          .skip(offset)
+          .limit(limit)
+          .populate('transcriptId', 'title content createdAt')
+          .lean();
+
+        return recordings.map(recording => ({
+          id: recording._id,
+          sessionId: recording.sessionId,
+          title: recording.title,
+          status: recording.status,
+          isParentSession: recording.isParentSession,
+          audioFiles: recording.audioFiles || [],
+          transcriptId: recording.transcriptId?._id,
+          transcript: recording.transcriptId,
+          metadata: recording.metadata,
+          error: recording.error,
+          retryCount: recording.retryCount || 0,
+          lastRetryAt: recording.lastRetryAt,
+          createdAt: recording.createdAt,
+          updatedAt: recording.updatedAt,
+          completedAt: recording.completedAt,
+          audioDeletedAt: recording.audioDeletedAt
+        }));
+      }
+    } catch (error) {
+      logger.error('❌ Failed to get user recordings:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get complete session with all chunks
+   * @param {string} userId - User ID
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object|null>} Complete session or null
+   */
+  async getCompleteSession(userId, sessionId) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const session = await Recording.getCompleteSession(userId, sessionId);
+      if (!session) {
+        return null;
+      }
+
+      // Get all chunks for this session
+      const chunks = await Recording.find({ 
+        _id: { $in: session.chunkRecordingIds } 
+      }).sort({ 'metadata.currentSegment': 1 });
+
+      return {
+        id: session._id,
+        sessionId: session.sessionId,
+        title: session.title,
+        status: session.status,
+        isParentSession: true,
+        audioFiles: chunks.flatMap(chunk => chunk.audioFiles || []),
+        transcriptId: session.transcriptId?._id,
+        transcript: session.transcriptId,
+        metadata: {
+          ...session.metadata,
+          totalChunks: chunks.length,
+          chunks: chunks.map(chunk => ({
+            id: chunk._id,
+            status: chunk.status,
+            segmentIndex: chunk.metadata?.segmentIndex,
+            audioFiles: chunk.audioFiles,
+            error: chunk.error,
+            createdAt: chunk.createdAt
+          }))
+        },
+        error: session.error,
+        retryCount: session.retryCount || 0,
+        lastRetryAt: session.lastRetryAt,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        completedAt: session.completedAt,
+        audioDeletedAt: session.audioDeletedAt
+      };
+    } catch (error) {
+      logger.error('❌ Failed to get complete session:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get specific recording by ID
+   * @param {string} recordingId - Recording ID
+   * @param {string} userId - User ID for authorization
+   * @returns {Promise<Object|null>} Recording or null
+   */
+  async getRecording(recordingId, userId) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const recording = await Recording.findOne({
+        _id: recordingId,
+        userId
+      }).populate('transcriptId', 'title content createdAt').lean();
+
+      if (!recording) {
+        return null;
+      }
+
+      // If this is a parent session, get chunk details
+      if (recording.isParentSession && recording.chunkRecordingIds?.length > 0) {
+        const chunks = await Recording.find({ 
+          _id: { $in: recording.chunkRecordingIds } 
+        }).sort({ 'metadata.currentSegment': 1 });
+
+        return {
+          id: recording._id,
+          sessionId: recording.sessionId,
+          title: recording.title,
+          status: recording.status,
+          isParentSession: true,
+          audioFiles: chunks.flatMap(chunk => chunk.audioFiles || []),
+          transcriptId: recording.transcriptId?._id,
+          transcript: recording.transcriptId,
+          metadata: {
+            ...recording.metadata,
+            totalChunks: chunks.length,
+            chunkStatuses: chunks.map(chunk => ({
+              id: chunk._id,
+              status: chunk.status,
+              segmentIndex: chunk.metadata?.segmentIndex,
+              error: chunk.error
+            }))
+          },
+          error: recording.error,
+          retryCount: recording.retryCount || 0,
+          lastRetryAt: recording.lastRetryAt,
+          createdAt: recording.createdAt,
+          updatedAt: recording.updatedAt,
+          completedAt: recording.completedAt,
+          audioDeletedAt: recording.audioDeletedAt
+        };
+      }
+
+      return {
+        id: recording._id,
+        sessionId: recording.sessionId,
+        title: recording.title,
+        status: recording.status,
+        isParentSession: recording.isParentSession,
+        audioFiles: recording.audioFiles || [],
+        transcriptId: recording.transcriptId?._id,
+        transcript: recording.transcriptId,
+        metadata: recording.metadata,
+        error: recording.error,
+        retryCount: recording.retryCount || 0,
+        lastRetryAt: recording.lastRetryAt,
+        createdAt: recording.createdAt,
+        updatedAt: recording.updatedAt,
+        completedAt: recording.completedAt,
+        audioDeletedAt: recording.audioDeletedAt
+      };
+    } catch (error) {
+      logger.error('❌ Failed to get recording:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update recording
+   * @param {string} recordingId - Recording ID
+   * @param {Object} updates - Updates to apply
+   * @returns {Promise<Object>} Update result
+   */
+  async updateRecording(recordingId, updates) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const recording = await Recording.findByIdAndUpdate(
+        recordingId,
+        {
+          ...updates,
+          updatedAt: new Date()
+        },
+        { new: true }
+      );
+
+      if (!recording) {
+        throw new Error('Recording not found');
+      }
+
+      logger.info('💾 Recording updated successfully', {
+        recordingId: recording.id,
+        updates: Object.keys(updates)
+      });
+
+      return recording;
+    } catch (error) {
+      logger.error('❌ Failed to update recording:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete recording
+   * @param {string} recordingId - Recording ID
+   * @returns {Promise<Object>} Delete result
+   */
+  async deleteRecording(recordingId) {
+    try {
+      const Recording = require('../models/Recording');
+      
+      const recording = await Recording.findById(recordingId);
+
+      if (!recording) {
+        throw new Error('Recording not found');
+      }
+
+      // If this is a parent session, delete all chunks first
+      if (recording.isParentSession && recording.chunkRecordingIds?.length > 0) {
+        for (const chunkId of recording.chunkRecordingIds) {
+          try {
+            await Recording.findByIdAndDelete(chunkId);
+          } catch (chunkError) {
+            logger.warn(`⚠️ Failed to delete chunk ${chunkId}:`, chunkError);
+          }
+        }
+      }
+
+      // Delete the main recording
+      await Recording.findByIdAndDelete(recordingId);
+
+      logger.info('🗑️ Recording deleted successfully', {
+        recordingId: recording.id,
+        deletedChunks: recording.chunkRecordingIds?.length || 0
+      });
+
+      return { success: true };
+    } catch (error) {
+      logger.error('❌ Failed to delete recording:', error);
+      throw error;
+    }
+  }
+
+  // =====================================================
   // SETTINGS MANAGEMENT
   // =====================================================
 
