@@ -170,18 +170,24 @@ router.delete('/:id',
   requireDatabase,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    
-    await databaseService.deleteTranscript(id, req.user.id);
+    try {
+      await databaseService.deleteTranscript(id, req.user.id);
 
-    logger.info('🗑️ Transcript deleted via API', {
-      transcriptId: id,
-      userId: req.user.id
-    });
+      logger.info('🗑️ Transcript deleted via API', {
+        transcriptId: id,
+        userId: req.user.id
+      });
 
-    res.json({
-      success: true,
-      message: 'Transcript deleted successfully'
-    });
+      return res.json({
+        success: true,
+        message: 'Transcript deleted successfully'
+      });
+    } catch (error) {
+      if (error && error.message === 'Transcript not found') {
+        return res.status(404).json({ success: false, error: 'Transcript not found' });
+      }
+      throw error;
+    }
   })
 );
 

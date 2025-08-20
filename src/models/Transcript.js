@@ -57,10 +57,16 @@ const debriefSchema = new mongoose.Schema({
 }, { _id: false });
 
 const transcriptSchema = new mongoose.Schema({
+  // Use String UUIDs as primary _id to avoid ObjectId casts
+  _id: {
+    type: String,
+    default: uuidv4
+  },
   id: {
     type: String,
     unique: true,
-    default: uuidv4
+    default: uuidv4,
+    required: true
   },
   userId: {
     type: String,
@@ -132,6 +138,14 @@ const transcriptSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+// Ensure consistency between _id and id
+transcriptSchema.pre('save', function(next) {
+  if (!this.id) {
+    this.id = this._id;
+  }
+  next();
 });
 
 // Indexes for performance

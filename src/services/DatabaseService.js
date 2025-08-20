@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Transcript = require('../models/Transcript');
 const ChatHistory = require('../models/ChatHistory');
 const Session = require('../models/Session');
+const Recording = require('../models/Recording');
 
 class DatabaseService {
   constructor() {
@@ -148,6 +149,11 @@ class DatabaseService {
    */
   async saveTranscript(transcriptData) {
     try {
+      // Ensure id field is set if not provided
+      if (!transcriptData.id) {
+        transcriptData.id = require('uuid').v4();
+      }
+      
       const transcript = new Transcript(transcriptData);
       await transcript.save();
 
@@ -208,15 +214,47 @@ class DatabaseService {
    * @returns {Promise<Object>} Transcript object
    */
   async getTranscript(transcriptId, userId = null) {
+
     try {
       const query = { id: transcriptId };
       if (userId) {
         query.userId = userId;
       }
 
+      logger.info('🔍 DatabaseService.getTranscript query:', {
+        transcriptId,
+        userId,
+        query,
+        transcriptIdType: typeof transcriptId
+      });
+
       const transcript = await Transcript.findOne(query).lean();
       
+      logger.info('🔍 DatabaseService.getTranscript result:', {
+        transcriptId,
+        userId,
+        found: !!transcript,
+        transcriptId: transcript?._id,
+        transcriptUserId: transcript?.userId
+      });
+      
       if (!transcript) {
+        // Let's check if transcript exists with different query
+        const allTranscripts = await Transcript.find({}).limit(3).lean();
+        logger.info('🔍 Sample transcripts in database:', {
+          count: allTranscripts.length,
+          sampleIds: allTranscripts.map(t => ({ _id: t._id, id: t.id, userId: t.userId }))
+        });
+        
+        // Check if transcript exists with 'id' field instead
+        const transcriptById = await Transcript.findOne({ id: transcriptId }).lean();
+        logger.info('🔍 Transcript search by id field:', {
+          transcriptId,
+          found: !!transcriptById,
+          transcriptId: transcriptById?._id,
+          transcriptUserId: transcriptById?.userId
+        });
+        
         throw new Error('Transcript not found');
       }
 
@@ -304,9 +342,25 @@ class DatabaseService {
    */
   async saveChatMessage(transcriptId, userId, role, content) {
     try {
+      logger.info('💾 DatabaseService.saveChatMessage called:', {
+        transcriptId,
+        userId,
+        role,
+        contentLength: content?.length,
+        contentPreview: content?.substring(0, 100)
+      });
+
       let chatHistory = await ChatHistory.findByTranscriptId(transcriptId);
+      
+      logger.info('💾 Existing chat history found:', {
+        transcriptId,
+        userId,
+        found: !!chatHistory,
+        existingMessageCount: chatHistory?.messages?.length || 0
+      });
 
       if (!chatHistory) {
+        logger.info('💾 Creating new chat history document');
         chatHistory = new ChatHistory({
           transcriptId,
           userId,
@@ -314,13 +368,21 @@ class DatabaseService {
         });
       }
 
-      await chatHistory.addMessage(role, content);
-
-      logger.debug('💬 Chat message saved', {
+      logger.info('💾 Adding message to chat history:', {
         transcriptId,
         userId,
         role,
-        messageCount: chatHistory.messages.length
+        contentLength: content?.length
+      });
+
+      await chatHistory.addMessage(role, content);
+
+      logger.info('✅ Chat message saved successfully', {
+        transcriptId,
+        userId,
+        role,
+        messageCount: chatHistory.messages.length,
+        totalMessages: chatHistory.messages.length
       });
 
       return chatHistory.toObject();
@@ -980,6 +1042,14 @@ class DatabaseService {
     try {
       const Recording = require('../models/Recording');
       
+      // Validate required fields in chunkData
+      if (!chunkData.userId) {
+        throw new Error('userId is required for chunk recording');
+      }
+      if (!chunkData.sessionId) {
+        throw new Error('sessionId is required for chunk recording');
+      }
+      
       // Get parent session
       const parentSession = await Recording.findById(parentSessionId);
       if (!parentSession) {
@@ -992,9 +1062,33 @@ class DatabaseService {
         isParentSession: false,
         parentSessionId: parentSession.sessionId,
         parentRecordingId: parentSessionId,
-        status: 'pending',
+        status: chunkData.status || 'pending',
         createdAt: new Date(),
         updatedAt: new Date()
+      });
+
+      // Ensure sessionId is set (it should come from chunkData but let's be explicit)
+      if (!chunkRecording.sessionId) {
+        chunkRecording.sessionId = parentSession.sessionId;
+      }
+
+      // Log the chunk recording data for debugging
+      logger.info('🔍 Creating chunk recording:', {
+        chunkData: {
+          userId: chunkData.userId,
+          sessionId: chunkData.sessionId,
+          title: chunkData.title,
+          status: chunkData.status
+        },
+        finalRecording: {
+          userId: chunkRecording.userId,
+          sessionId: chunkRecording.sessionId,
+          title: chunkRecording.title,
+          status: chunkRecording.status,
+          isParentSession: chunkRecording.isParentSession,
+          parentSessionId: chunkRecording.parentSessionId,
+          parentRecordingId: chunkRecording.parentRecordingId
+        }
       });
 
       await chunkRecording.save();
@@ -1349,6 +1443,37 @@ class DatabaseService {
       throw error;
     }
   }
+
+  // =====================================================
+  // TRANSCRIPT OPERATIONS
+  // =====================================================
+
+  /**
+   * Save a new transcript
+   * @param {Object} transcriptData - Transcript data
+   * @returns {Promise<Object>} Saved transcript
+   */
+  async saveTranscript(transcriptData) {
+    try {
+      const Transcript = require('../models/Transcript');
+      
+      const transcript = new Transcript(transcriptData);
+      const savedTranscript = await transcript.save();
+      
+      logger.info('💾 Transcript saved successfully', {
+        transcriptId: savedTranscript.id,
+        userId: savedTranscript.userId,
+        title: savedTranscript.title
+      });
+      
+      return savedTranscript;
+    } catch (error) {
+      logger.error('❌ Failed to save transcript:', error);
+      throw error;
+    }
+  }
+
+  // Removed duplicate getTranscript method - using the main one at line 216
 
   // =====================================================
   // SETTINGS MANAGEMENT

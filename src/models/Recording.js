@@ -38,8 +38,7 @@ const audioFileSchema = new mongoose.Schema({
 
 const recordingSchema = new mongoose.Schema({
   userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String,
     required: true,
     index: true
   },
@@ -66,14 +65,14 @@ const recordingSchema = new mongoose.Schema({
   
   // For chunked recordings, reference to parent
   parentRecordingId: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: String,  // Changed from ObjectId to String since Recording uses String IDs
     ref: 'Recording',
     default: null
   },
   
   // For parent sessions, array of chunk recordings
   chunkRecordingIds: [{
-    type: mongoose.Schema.Types.ObjectId,
+    type: String,  // Changed from ObjectId to String since Recording uses String IDs
     ref: 'Recording'
   }],
   
@@ -92,7 +91,7 @@ const recordingSchema = new mongoose.Schema({
   audioFiles: [audioFileSchema],
   
   transcriptId: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: String,  // Changed from ObjectId to String since Transcript uses UUID strings
     ref: 'Transcript',
     index: true
   },

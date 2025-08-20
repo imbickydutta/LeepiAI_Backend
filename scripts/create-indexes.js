@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const User = require('../src/models/User');
 const Session = require('../src/models/Session');
 const Settings = require('../src/models/Settings');
+const Recording = require('../src/models/Recording');
 const logger = require('../src/utils/logger');
 
 async function createIndexes() {
@@ -28,7 +29,8 @@ async function createIndexes() {
     const results = await Promise.all([
       User.ensureIndexes(),
       Session.ensureIndexes(),
-      Settings.ensureIndexes()
+      Settings.ensureIndexes(),
+      Recording.ensureIndexes()
     ]);
 
     logger.info('✅ All indexes created successfully');

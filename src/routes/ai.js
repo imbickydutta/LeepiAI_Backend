@@ -37,8 +37,25 @@ router.post('/summary/:transcriptId',
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
+    logger.info('🔍 Attempting to get transcript for summary:', {
+      transcriptId,
+      userId: req.user.id,
+      transcriptIdType: typeof transcriptId,
+      transcriptIdLength: transcriptId?.length
+    });
+    
     // Get transcript (verifies ownership)
     const transcript = await databaseService.getTranscript(transcriptId, req.user.id);
+    
+    logger.info('🔍 Transcript retrieved for summary:', {
+      transcriptId,
+      userId: req.user.id,
+      transcriptFound: !!transcript,
+      transcriptId: transcript?._id,
+      transcriptUserId: transcript?.userId,
+      hasSummary: !!transcript?.summary,
+      hasContent: !!transcript?.content
+    });
     
     // Check if summary already exists
     if (transcript.summary) {
@@ -90,8 +107,70 @@ router.post('/debrief/:transcriptId',
   asyncHandler(async (req, res) => {
     const { transcriptId } = req.params;
     
+    logger.info('🔍 Attempting to get transcript for debrief:', {
+      transcriptId,
+      userId: req.user.id,
+      transcriptIdType: typeof transcriptId,
+      transcriptIdLength: transcriptId?.length
+    });
+    
     // Get transcript (verifies ownership)
-    const transcript = await databaseService.getTranscript(transcriptId, req.user.id);
+    let transcript;
+    try {
+      transcript = await databaseService.getTranscript(transcriptId, req.user.id);
+    } catch (error) {
+      logger.error('❌ Failed to get transcript for debrief:', {
+        error: error.message,
+        transcriptId,
+        userId: req.user.id
+      });
+      
+      // Try to get transcript without user restriction to see if it exists
+      try {
+        const Transcript = require('../models/Transcript');
+        const rawTranscript = await Transcript.findOne({ _id: transcriptId }).lean();
+        logger.info('🔍 Raw transcript query result:', {
+          transcriptId,
+          found: !!rawTranscript,
+          rawId: rawTranscript?._id,
+          rawUserId: rawTranscript?.userId
+        });
+        
+        // Also try searching by 'id' field to see if there's a mismatch
+        const transcriptById = await Transcript.findOne({ id: transcriptId }).lean();
+        logger.info('🔍 Transcript search by id field:', {
+          transcriptId,
+          found: !!transcriptById,
+          rawId: transcriptById?._id,
+          rawUserId: transcriptById?.userId
+        });
+        
+        // Search for any transcript with similar ID
+        const allTranscripts = await Transcript.find({}).limit(5).lean();
+        logger.info('🔍 Sample transcripts in database:', {
+          count: allTranscripts.length,
+          sampleIds: allTranscripts.map(t => ({ _id: t._id, id: t.id, userId: t.userId }))
+        });
+        
+      } catch (rawError) {
+        logger.error('❌ Raw transcript query also failed:', rawError.message);
+      }
+      
+      return res.status(500).json({
+        success: false,
+        error: `Failed to retrieve transcript: ${error.message}`
+      });
+    }
+    
+    logger.info('🔍 Transcript retrieved for debrief:', {
+      transcriptId,
+      userId: req.user.id,
+      transcriptFound: !!transcript,
+      transcriptId: transcript?._id,
+      transcriptUserId: transcript?.userId,
+      hasDebrief: !!transcript?.debrief,
+      hasContent: !!transcript?.content
+    });
     
     // Check if debrief already exists
     if (transcript.debrief?.content) {
@@ -273,11 +352,51 @@ router.post('/chat/:transcriptId',
     const { transcriptId } = req.params;
     const { message, saveToHistory = true } = req.body;
     
+    logger.info('🔍 Chat request received:', {
+      transcriptId,
+      userId: req.user.id,
+      message: message?.substring(0, 100),
+      messageLength: message?.length,
+      saveToHistory,
+      body: req.body,
+      contentType: req.headers['content-type'],
+      hasBody: !!req.body
+    });
+    
     // Get transcript (verifies ownership)
     const transcript = await databaseService.getTranscript(transcriptId, req.user.id);
     
+    logger.info('🔍 Transcript retrieved for chat:', {
+      transcriptId,
+      userId: req.user.id,
+      transcriptFound: !!transcript,
+      hasContent: !!transcript?.content,
+      contentLength: transcript?.content?.length,
+      contentPreview: transcript?.content?.substring(0, 100)
+    });
+    
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+    
+    if (!transcript.content) {
+      return res.status(400).json({
+        success: false,
+        error: 'Transcript has no content to analyze'
+      });
+    }
+    
     // Get chat history
     const chatHistory = await databaseService.getChatHistory(transcriptId, req.user.id);
+    
+    logger.info('🔍 Chat history retrieved:', {
+      transcriptId,
+      userId: req.user.id,
+      historyLength: chatHistory?.length || 0
+    });
     
     // Generate AI response
     const result = await aiService.chatWithTranscript(transcript.content, message, chatHistory);
@@ -291,8 +410,25 @@ router.post('/chat/:transcriptId',
 
     // Save to chat history if requested
     if (saveToHistory) {
-      await databaseService.saveChatMessage(transcriptId, req.user.id, 'user', message);
-      await databaseService.saveChatMessage(transcriptId, req.user.id, 'assistant', result.response);
+      logger.info('💾 Saving chat messages to history:', {
+        transcriptId,
+        userId: req.user.id,
+        userMessage: message?.substring(0, 100),
+        assistantMessage: result.response?.substring(0, 100)
+      });
+      
+      try {
+        await databaseService.saveChatMessage(transcriptId, req.user.id, 'user', message);
+        logger.info('✅ User message saved to chat history');
+        
+        await databaseService.saveChatMessage(transcriptId, req.user.id, 'assistant', result.response);
+        logger.info('✅ Assistant message saved to chat history');
+      } catch (error) {
+        logger.error('❌ Failed to save chat messages:', error);
+        // Don't fail the entire request if chat history saving fails
+      }
+    } else {
+      logger.info('💾 Skipping chat history storage (saveToHistory: false)');
     }
 
     logger.info('💬 AI chat response generated', {

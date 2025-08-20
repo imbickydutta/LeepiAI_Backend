@@ -317,7 +317,7 @@ router.delete('/:id',
 
       // Delete transcript if exists
       if (recording.transcriptId) {
-        await databaseService.deleteTranscript(recording.transcriptId);
+        await databaseService.deleteTranscript(recording.transcriptId, req.user.id);
       }
 
       // Delete recording record

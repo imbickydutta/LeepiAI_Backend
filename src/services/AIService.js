@@ -491,10 +491,17 @@ ${transcript}
 USER QUESTION: ${message}
 
 Please provide a helpful, accurate response based on the transcript content. 
+- Use markdown formatting to structure your response clearly
+- Use **bold** for emphasis and key points
+- Use bullet points (- or *) for lists
+- Use ## for section headers when organizing multiple topics
+- Use \`code\` for technical terms or specific phrases
 - Reference specific parts of the transcript when relevant
 - Be conversational but informative
 - If the question is about something not in the transcript, clearly state that
 - Provide actionable insights when possible
+
+Format your response using markdown for better readability.
 `;
 
     return prompt;

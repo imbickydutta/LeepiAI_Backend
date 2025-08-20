@@ -188,6 +188,7 @@ const startServer = async () => {
           const User = require('./models/User');
           const Session = require('./models/Session');
           const Settings = require('./models/Settings');
+          const Recording = require('./models/Recording');
 
           // Temporarily disable index creation to prevent infinite loop
           logger.info('⚠️ Index creation temporarily disabled to prevent infinite loop');

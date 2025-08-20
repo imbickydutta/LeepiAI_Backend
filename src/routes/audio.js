@@ -1,13 +1,76 @@
 const express = require('express');
 const { authenticate } = require('../middleware/auth');
 const { requireDatabase } = require('../middleware/databaseCheck');
-const { uploadSingleAudio, uploadDualAudio, uploadMicSystemAudio, uploadSegmentedDualAudio, cleanupFiles } = require('../middleware/upload');
+const { uploadSingleAudio, uploadMicSystemAudio, uploadSegmentedDualAudio, cleanupFiles } = require('../middleware/upload');
 const { asyncHandler } = require('../middleware/errorHandler');
 const audioService = require('../services/AudioService');
 const databaseService = require('../services/DatabaseService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+
+/**
+ * Utility function to validate and fix segment timestamps
+ * @param {Array} segments - Array of transcript segments
+ * @returns {Array} - Segments with valid timestamps
+ */
+function validateAndFixSegmentTimestamps(segments) {
+  // Filter out segments with empty text
+  let validSegments = segments.filter(segment => 
+    segment.text && segment.text.trim().length > 0
+  );
+
+  // Ensure all segments have valid start/end timestamps
+  let currentTime = 0;
+  validSegments = validSegments.map((segment) => {
+    const hasValidStart = Number.isFinite(segment.start);
+    const hasValidEnd = Number.isFinite(segment.end);
+    const needsEstimation = !hasValidStart || !hasValidEnd || (hasValidStart && hasValidEnd && segment.end <= segment.start);
+    
+    if (needsEstimation) {
+      const estimatedDuration = segment.text ? Math.max(2, segment.text.length * 0.05) : 2;
+      const startTime = currentTime;
+      const endTime = startTime + estimatedDuration;
+      currentTime = endTime + 0.5;
+      return { ...segment, start: startTime, end: endTime };
+    }
+    
+    // Ensure proper sequencing even for valid timestamps
+    if (segment.start < currentTime) {
+      const duration = Math.max(0.5, segment.end - segment.start);
+      segment.start = currentTime;
+      segment.end = segment.start + duration;
+    }
+    currentTime = segment.end + 0.5;
+    return segment;
+  });
+
+  return validSegments;
+}
+
+/**
+ * Utility function to create audio file metadata
+ * @param {Object} file - Multer file object
+ * @param {string} type - Audio type ('input' or 'output')
+ * @param {number} segmentIndex - Optional segment index
+ * @returns {Object} - Formatted audio file metadata
+ */
+function createAudioFileMetadata(file, type, segmentIndex = null) {
+  const metadata = {
+    path: file.path,
+    originalName: file.originalname,
+    filename: file.filename,
+    size: file.size,
+    mimetype: file.mimetype,
+    type: type
+  };
+  
+  if (segmentIndex !== null) {
+    metadata.segmentIndex = segmentIndex;
+  }
+  
+  return metadata;
+}
 
 /**
  * POST /api/audio/upload
@@ -31,14 +94,7 @@ router.post('/upload',
             userId: req.user.id,
             title: req.file.originalname || 'Failed Audio Recording',
             status: 'failed',
-            audioFiles: [{
-              path: req.file.path,
-              originalName: req.file.originalname,
-              filename: req.file.filename,
-              size: req.file.size,
-              mimetype: req.file.mimetype,
-              type: 'input'
-            }],
+            audioFiles: [createAudioFileMetadata(req.file, 'input')],
             metadata: {
               recordingType: 'single',
               hasInputAudio: true,
@@ -75,18 +131,54 @@ router.post('/upload',
         return `AUDIO ${timeLabel}: ${text}`;
       }).join('\n');
 
+      // Validate and fix segment timestamps
+      const validSegments = validateAndFixSegmentTimestamps(transcriptionResult.segments);
+
+      // Log segment validation results
+      logger.info('🔍 Single audio segment validation results:', {
+        totalSegments: transcriptionResult.segments.length,
+        validSegments: validSegments.length,
+        invalidSegments: transcriptionResult.segments.length - validSegments.length,
+        sampleInvalidSegments: transcriptionResult.segments
+          .filter(segment => !segment.text || !segment.text.trim() || typeof segment.start !== 'number' || typeof segment.end !== 'number')
+          .slice(0, 3)
+          .map(s => ({
+            hasText: !!s.text,
+            textLength: s.text?.length || 0,
+            hasStart: typeof s.start === 'number',
+            hasEnd: typeof s.end === 'number',
+            start: s.start,
+            end: s.end
+          }))
+      });
+
+      // Final validation: ensure all segments have required fields
+      const finalValidation = validSegments.every(segment => 
+        segment.text && 
+        segment.text.trim().length > 0 && 
+        typeof segment.start === 'number' && 
+        typeof segment.end === 'number' &&
+        segment.start >= 0 &&
+        segment.end > segment.start
+      );
+
+      if (!finalValidation) {
+        logger.error('❌ Final segment validation failed - segments still missing required fields');
+        throw new Error('Segment validation failed - segments missing required start/end timestamps');
+      }
+
       // Save to database
       const savedTranscript = await databaseService.saveTranscript({
         userId: req.user.id,
         title: req.file.originalname || 'Audio Transcript',
         content: transcript,
-        segments: transcriptionResult.segments.map(segment => ({
+        segments: validSegments.map(segment => ({
           ...segment,
           source: 'input'
         })),
         metadata: {
           duration: transcriptionResult.duration,
-          segmentCount: transcriptionResult.segments.length,
+          segmentCount: validSegments.length,
           hasInputAudio: true,
           hasOutputAudio: false,
           sources: ['input'],
@@ -102,18 +194,11 @@ router.post('/upload',
           userId: req.user.id,
           title: req.file.originalname || 'Audio Recording',
           status: 'completed',
-          audioFiles: [{
-            path: req.file.path,
-            originalName: req.file.originalname,
-            filename: req.file.filename,
-            size: req.file.size,
-            mimetype: req.file.mimetype,
-            type: 'input'
-          }],
+          audioFiles: [createAudioFileMetadata(req.file, 'input')],
           transcriptId: savedTranscript.id,
           metadata: {
             duration: transcriptionResult.duration,
-            segmentCount: transcriptionResult.segments.length,
+            segmentCount: validSegments.length,
             recordingType: 'single',
             hasInputAudio: true,
             hasOutputAudio: false,
@@ -134,7 +219,7 @@ router.post('/upload',
         userId: req.user.id,
         transcriptId: savedTranscript.id,
         duration: transcriptionResult.duration,
-        segmentCount: transcriptionResult.segments.length
+        segmentCount: validSegments.length
       });
 
       res.json({
@@ -150,14 +235,7 @@ router.post('/upload',
           userId: req.user.id,
           title: req.file.originalname || 'Failed Audio Recording',
           status: 'failed',
-          audioFiles: [{
-            path: req.file.path,
-            originalName: req.file.originalname,
-            filename: req.file.filename,
-            size: req.file.size,
-            mimetype: req.file.mimetype,
-            type: 'input'
-          }],
+          audioFiles: [createAudioFileMetadata(req.file, 'input')],
           metadata: {
             recordingType: 'single',
             hasInputAudio: true,
@@ -184,6 +262,9 @@ router.post('/upload',
     }
   })
 );
+
+// (Removed duplicate legacy '/upload-segmented-dual' route. The modern implementation below handles
+// dual-channel merging with MIC/SYS tags, timestamp alignment, and parent session updates.)
 
 /**
  * POST /api/audio/upload-dual
@@ -254,8 +335,44 @@ router.post('/upload-dual',
         });
       }
 
+      // Validate and fix segment timestamps
+      const validSegments = validateAndFixSegmentTimestamps(transcriptionResult.mergedSegments);
+
+      // Log segment validation results
+      logger.info('🔍 Dual audio segment validation results:', {
+        totalSegments: transcriptionResult.mergedSegments.length,
+        validSegments: validSegments.length,
+        invalidSegments: transcriptionResult.mergedSegments.length - validSegments.length,
+        sampleInvalidSegments: transcriptionResult.mergedSegments
+          .filter(segment => !segment.text || !segment.text.trim() || typeof segment.start !== 'number' || typeof segment.end !== 'number')
+          .slice(0, 3)
+          .map(s => ({
+            hasText: !!s.text,
+            textLength: s.text?.length || 0,
+            hasStart: typeof s.start === 'number',
+            hasEnd: typeof s.end === 'number',
+            start: s.start,
+            end: s.end
+          }))
+      });
+
+      // Final validation: ensure all segments have required fields
+      const finalValidation = validSegments.every(segment => 
+        segment.text && 
+        segment.text.trim().length > 0 && 
+        typeof segment.start === 'number' && 
+        typeof segment.end === 'number' &&
+        segment.start >= 0 &&
+        segment.end > segment.start
+      );
+
+      if (!finalValidation) {
+        logger.error('❌ Final segment validation failed - segments still missing required fields');
+        throw new Error('Segment validation failed - segments missing required start/end timestamps');
+      }
+
       // Format transcript content from merged segments
-      const transcript = transcriptionResult.mergedSegments.map((segment, index) => {
+      const transcript = validSegments.map((segment, index) => {
         const sourceLabel = segment.source === 'input' ? 'MIC' : 'SYS';
         const startTime = typeof segment.start === 'number' ? segment.start.toFixed(1) : '0.0';
         const timeLabel = `[${startTime}s]`;
@@ -268,10 +385,10 @@ router.post('/upload-dual',
         userId: req.user.id,
         title: `Dual Audio Recording - ${new Date().toISOString().split('T')[0]}`,
         content: transcript,
-        segments: transcriptionResult.mergedSegments,
+        segments: validSegments,
         metadata: {
           duration: transcriptionResult.totalDuration,
-          segmentCount: transcriptionResult.mergedSegments.length,
+          segmentCount: validSegments.length,
           hasInputAudio: !!microphone,
           hasOutputAudio: !!system,
           sources: ['input', 'output'].filter(source => 
@@ -406,6 +523,21 @@ router.post('/upload-segmented-dual',
         });
 
         try {
+          // Debug: Log what files are being processed
+          logger.info(`🔍 Processing segment ${i + 1} files:`, {
+            microphoneFile: {
+              name: micFile.originalname,
+              size: micFile.size,
+              path: micFile.path
+            },
+            systemFile: sysFile ? {
+              name: sysFile.originalname,
+              size: sysFile.size,
+              path: sysFile.path
+            } : null,
+            willCallTranscribeDual: !!sysFile
+          });
+
           // Process dual audio for this segment
           const transcriptionResult = await audioService.transcribeDualAudio(
             micFile.path,
@@ -429,24 +561,8 @@ router.post('/upload-segmented-dual',
               title: `Segment ${i + 1} - Failed`,
               status: 'failed',
               audioFiles: [
-                {
-                  path: micFile.path,
-                  originalName: micFile.originalname,
-                  filename: micFile.filename,
-                  size: micFile.size,
-                  mimetype: micFile.mimetype,
-                  type: 'input',
-                  segmentIndex: i
-                },
-                ...(sysFile ? [{
-                  path: sysFile.path,
-                  originalName: sysFile.originalname,
-                  filename: sysFile.filename,
-                  size: sysFile.size,
-                  mimetype: sysFile.mimetype,
-                  type: 'output',
-                  segmentIndex: i
-                }] : [])
+                createAudioFileMetadata(micFile, 'input', i),
+                ...(sysFile ? [createAudioFileMetadata(sysFile, 'output', i)] : [])
               ],
               metadata: {
                 segmentIndex: i,
@@ -474,24 +590,8 @@ router.post('/upload-segmented-dual',
             title: `Segment ${i + 1} - Success`,
             status: 'completed',
             audioFiles: [
-              {
-                path: micFile.path,
-                originalName: micFile.originalname,
-                filename: micFile.filename,
-                size: micFile.size,
-                mimetype: micFile.mimetype,
-                type: 'input',
-                segmentIndex: i
-              },
-              ...(sysFile ? [{
-                path: sysFile.path,
-                originalName: sysFile.originalname,
-                filename: sysFile.filename,
-                size: sysFile.size,
-                mimetype: sysFile.mimetype,
-                type: 'output',
-                segmentIndex: i
-              }] : [])
+              createAudioFileMetadata(micFile, 'input', i),
+              ...(sysFile ? [createAudioFileMetadata(sysFile, 'output', i)] : [])
             ],
             metadata: {
               segmentIndex: i,
@@ -508,12 +608,37 @@ router.post('/upload-segmented-dual',
             }
           });
 
+          // Debug: Log segments from transcription result
+          logger.info(`🔍 Transcription result for segment ${i + 1}:`, {
+            hasMergedSegments: !!transcriptionResult.mergedSegments,
+            mergedSegmentsCount: transcriptionResult.mergedSegments?.length || 0,
+            sampleMergedSegments: transcriptionResult.mergedSegments?.slice(0, 3).map(s => ({
+              text: s.text?.substring(0, 50) + '...',
+              source: s.source,
+              speaker: s.speaker,
+              start: s.start,
+              end: s.end
+            })) || []
+          });
+
           // Adjust timestamps for this segment
           const adjustedSegments = transcriptionResult.mergedSegments.map(segment => ({
             ...segment,
             start: segment.start + currentTimeOffset,
             end: segment.end + currentTimeOffset
           }));
+
+          // Debug: Log adjusted segments
+          logger.info(`🔍 Adjusted segments for segment ${i + 1}:`, {
+            adjustedSegmentsCount: adjustedSegments.length,
+            sampleAdjustedSegments: adjustedSegments.slice(0, 3).map(s => ({
+              text: s.text?.substring(0, 50) + '...',
+              source: s.source,
+              speaker: s.speaker,
+              start: s.start,
+              end: s.end
+            }))
+          });
 
           allSegments.push(...adjustedSegments);
           totalDuration += transcriptionResult.totalDuration;
@@ -543,24 +668,8 @@ router.post('/upload-segmented-dual',
             title: `Segment ${i + 1} - Error`,
             status: 'failed',
             audioFiles: [
-              {
-                path: micFile.path,
-                originalName: micFile.originalname,
-                filename: micFile.filename,
-                size: micFile.size,
-                mimetype: micFile.mimetype,
-                type: 'input',
-                segmentIndex: i
-              },
-              ...(sysFile ? [{
-                path: sysFile.path,
-                originalName: sysFile.originalname,
-                filename: sysFile.filename,
-                size: sysFile.size,
-                mimetype: sysFile.mimetype,
-                type: 'output',
-                segmentIndex: i
-              }] : [])
+              createAudioFileMetadata(micFile, 'input', i),
+              ...(sysFile ? [createAudioFileMetadata(sysFile, 'output', i)] : [])
             ],
             metadata: {
               segmentIndex: i,
@@ -581,22 +690,71 @@ router.post('/upload-segmented-dual',
         }
       }
 
-      // Filter out segments with empty text to prevent validation errors
-      const validSegments = allSegments.filter(segment => 
-        segment.text && segment.text.trim().length > 0
+      // Log raw segments before validation
+      logger.info('🔍 Raw segments before validation:', {
+        totalSegments: allSegments.length,
+        validTextSegments: allSegments.filter(segment => 
+          segment.text && segment.text.trim().length > 0
+        ).length,
+        sampleRawSegments: allSegments.slice(0, 3).map(s => ({
+          hasText: !!s.text,
+          textLength: s.text?.length || 0,
+          hasStart: s.hasOwnProperty('start'),
+          hasEnd: s.hasOwnProperty('end'),
+          start: s.start,
+          end: s.end,
+          startType: typeof s.start,
+          endType: typeof s.end
+        }))
+      });
+
+      // Validate and fix segment timestamps
+      const validSegments = validateAndFixSegmentTimestamps(allSegments);
+
+      // Log segment validation results
+      logger.info('🔍 Segment validation results:', {
+        totalSegments: allSegments.length,
+        validSegments: validSegments.length,
+        invalidSegments: allSegments.length - validSegments.length,
+        sampleInvalidSegments: allSegments
+          .filter(segment => !segment.text || !segment.text.trim() || typeof segment.start !== 'number' || typeof segment.end !== 'number')
+          .slice(0, 3)
+          .map(s => ({
+            hasText: !!s.text,
+            textLength: s.text?.length || 0,
+            hasStart: typeof s.start === 'number',
+            hasEnd: typeof s.end === 'number',
+            start: s.start,
+            end: s.end
+          }))
+      });
+
+      // Final validation: ensure all segments have required fields
+      const finalValidation = validSegments.every(segment => 
+        segment.text && 
+        segment.text.trim().length > 0 && 
+        typeof segment.start === 'number' && 
+        typeof segment.end === 'number' &&
+        segment.start >= 0 &&
+        segment.end > segment.start
       );
+
+      if (!finalValidation) {
+        logger.error('❌ Final segment validation failed - segments still missing required fields');
+        throw new Error('Segment validation failed - segments missing required start/end timestamps');
+      }
 
       if (validSegments.length === 0) {
         // Update parent session status to failed
         await databaseService.updateRecording(parentSession.id, {
           status: 'failed',
-          error: 'No valid segments were processed'
+          error: 'No valid segments were processed - all segments must have start/end timestamps and non-empty text'
         });
 
         await cleanupFiles(filesToCleanup);
         return res.status(400).json({
           success: false,
-          error: 'No valid segments were processed'
+          error: 'No valid segments were processed - all segments must have start/end timestamps and non-empty text'
         });
       }
 
@@ -608,6 +766,30 @@ router.post('/upload-segmented-dual',
         const text = segment.text || '';
         return `${sourceLabel} ${timeLabel}: ${text}`;
       }).join('\n');
+
+      // Debug: Log segments before saving transcript
+      logger.info('🔍 Segments being saved to transcript:', {
+        totalSegments: validSegments.length,
+        sampleSegments: validSegments.slice(0, 3).map(s => ({
+          hasText: !!s.text,
+          textLength: s.text?.length || 0,
+          hasStart: s.hasOwnProperty('start'),
+          hasEnd: s.hasOwnProperty('end'),
+          start: s.start,
+          end: s.end,
+          startType: typeof s.start,
+          endType: typeof s.end,
+          source: s.source,
+          speaker: s.speaker
+        }))
+      });
+
+      // Debug: Check source distribution
+      const sourceCounts = validSegments.reduce((acc, segment) => {
+        acc[segment.source || 'unknown'] = (acc[segment.source || 'unknown'] || 0) + 1;
+        return acc;
+      }, {});
+      logger.info('🔍 Source distribution in final segments:', sourceCounts);
 
       // Save transcript
       const savedTranscript = await databaseService.saveTranscript({

@@ -59,6 +59,13 @@ chatHistorySchema.statics.findByCustomId = function(id) {
 
 // Instance method to add message
 chatHistorySchema.methods.addMessage = function(role, content) {
+  console.log('💾 ChatHistory.addMessage called:', {
+    role,
+    contentLength: content?.length,
+    contentPreview: content?.substring(0, 100),
+    currentMessageCount: this.messages.length
+  });
+  
   const message = {
     role,
     content,
@@ -67,6 +74,8 @@ chatHistorySchema.methods.addMessage = function(role, content) {
   
   this.messages.push(message);
   this.updatedAt = new Date();
+  
+  console.log('💾 Message added, new count:', this.messages.length);
   
   return this.save();
 };
