@@ -91,6 +91,43 @@ const transcriptSchema = new mongoose.Schema({
     maxlength: [5000, 'Summary cannot exceed 5000 characters']
   },
   debrief: debriefSchema,
+  
+  // New interview details fields
+  interviewDetails: {
+    companyName: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'Company name cannot exceed 100 characters']
+    },
+    round: {
+      type: String,
+      enum: ['Screening', 'Technical Round 1', 'Technical Round 2', 'System Design', 'Behavioral', 'Final Round', 'HR Round', 'Other'],
+      trim: true
+    },
+    interviewerName: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'Interviewer name cannot exceed 100 characters']
+    },
+    studentName: {
+      type: String,
+      trim: true,
+      maxlength: [100, 'Student name cannot exceed 100 characters']
+    },
+    performanceRating: {
+      type: Number,
+      min: [1, 'Performance rating must be at least 1'],
+      max: [10, 'Performance rating cannot exceed 10']
+    },
+    isUpdated: {
+      type: Boolean,
+      default: false
+    },
+    updatedAt: {
+      type: Date
+    }
+  },
+  
   aiAnalysis: {
     sentiment: String,
     keyTopics: [{
@@ -148,10 +185,23 @@ transcriptSchema.pre('save', function(next) {
   next();
 });
 
+// Update interview details tracking
+transcriptSchema.pre('save', function(next) {
+  // Check if interview details have been modified
+  if (this.isModified('interviewDetails')) {
+    this.interviewDetails.isUpdated = true;
+    this.interviewDetails.updatedAt = new Date();
+  }
+  next();
+});
+
 // Indexes for performance
 transcriptSchema.index({ userId: 1, createdAt: -1 });
 transcriptSchema.index({ id: 1 });
 transcriptSchema.index({ 'metadata.duration': 1 });
+transcriptSchema.index({ 'interviewDetails.isUpdated': 1 });
+transcriptSchema.index({ 'interviewDetails.companyName': 1 });
+transcriptSchema.index({ 'interviewDetails.round': 1 });
 
 // Update segmentCount when segments change
 transcriptSchema.pre('save', function(next) {
@@ -198,9 +248,41 @@ transcriptSchema.methods.getStats = function() {
     wordCount: this.content.split(/\s+/).length,
     hasSummary: !!this.summary,
     hasDebrief: !!this.debrief?.content,
+    hasInterviewDetails: this.interviewDetails?.isUpdated || false,
     quality: this.metadata.quality,
     createdAt: this.createdAt
   };
+};
+
+// Instance method to update interview details
+transcriptSchema.methods.updateInterviewDetails = function(details) {
+  // Update only the provided fields
+  if (details.companyName !== undefined) {
+    this.interviewDetails.companyName = details.companyName;
+  }
+  if (details.round !== undefined) {
+    this.interviewDetails.round = details.round;
+  }
+  if (details.interviewerName !== undefined) {
+    this.interviewDetails.interviewerName = details.interviewerName;
+  }
+  if (details.studentName !== undefined) {
+    this.interviewDetails.studentName = details.studentName;
+  }
+  if (details.performanceRating !== undefined) {
+    this.interviewDetails.performanceRating = details.performanceRating;
+  }
+  
+  // Mark as updated
+  this.interviewDetails.isUpdated = true;
+  this.interviewDetails.updatedAt = new Date();
+  
+  return this.save();
+};
+
+// Instance method to get interview details
+transcriptSchema.methods.getInterviewDetails = function() {
+  return this.interviewDetails || {};
 };
 
 // Virtual for word count

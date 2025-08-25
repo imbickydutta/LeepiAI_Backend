@@ -305,6 +305,80 @@ router.post('/:id/export',
 );
 
 /**
+ * PUT /api/transcripts/:id/interview-details
+ * Update interview details for a transcript
+ */
+router.put('/:id/interview-details',
+  authenticate,
+  requireDatabase,
+  [
+    body('companyName').optional().isString().trim().isLength({ max: 100 }).withMessage('Company name cannot exceed 100 characters'),
+    body('round').optional().isIn(['Screening', 'Technical Round 1', 'Technical Round 2', 'System Design', 'Behavioral', 'Final Round', 'HR Round', 'Other']).withMessage('Invalid round type'),
+    body('interviewerName').optional().isString().trim().isLength({ max: 100 }).withMessage('Interviewer name cannot exceed 100 characters'),
+    body('studentName').optional().isString().trim().isLength({ max: 100 }).withMessage('Student name cannot exceed 100 characters'),
+    body('performanceRating').optional().isInt({ min: 1, max: 10 }).withMessage('Performance rating must be between 1 and 10')
+  ],
+  handleValidationErrors,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Get the transcript
+    const transcript = await databaseService.getTranscriptById(id, req.user.id);
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+
+    // Update interview details
+    const updatedTranscript = await transcript.updateInterviewDetails(updateData);
+
+    logger.info('📝 Interview details updated', {
+      transcriptId: id,
+      userId: req.user.id,
+      updatedFields: Object.keys(updateData)
+    });
+
+    res.json({
+      success: true,
+      message: 'Interview details updated successfully',
+      transcript: {
+        id: updatedTranscript.id,
+        interviewDetails: updatedTranscript.interviewDetails
+      }
+    });
+  })
+);
+
+/**
+ * GET /api/transcripts/:id/interview-details
+ * Get interview details for a transcript
+ */
+router.get('/:id/interview-details',
+  authenticate,
+  requireDatabase,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Get the transcript
+    const transcript = await databaseService.getTranscriptById(id, req.user.id);
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      interviewDetails: transcript.getInterviewDetails()
+    });
+  })
+);
+
+/**
  * POST /api/transcripts/bulk-delete
  * Delete multiple transcripts
  */

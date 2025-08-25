@@ -183,7 +183,11 @@ router.post('/debrief/:transcriptId',
     }
 
     // Generate debrief
-    const result = await aiService.generateInterviewDebrief(transcript.content);
+    const result = await aiService.generateInterviewDebrief(
+      transcript.content,
+      transcript.interviewDetails || {},
+      transcript.createdAt
+    );
     
     if (!result.success) {
       return res.status(500).json({
@@ -306,7 +310,11 @@ router.post('/admin/debrief/:transcriptId',
     }
 
     // Generate debrief
-    const result = await aiService.generateInterviewDebrief(transcript.content);
+    const result = await aiService.generateInterviewDebrief(
+      transcript.content,
+      transcript.interviewDetails || {},
+      transcript.createdAt
+    );
     
     if (!result.success) {
       return res.status(500).json({
@@ -559,6 +567,68 @@ router.post('/follow-up-questions/:transcriptId',
 );
 
 /**
+ * POST /api/ai/regenerate-debrief/:transcriptId
+ * Regenerate debrief with updated interview details
+ */
+router.post('/regenerate-debrief/:transcriptId',
+  authenticate,
+  requireDatabase,
+  asyncHandler(async (req, res) => {
+    const { transcriptId } = req.params;
+    
+    // Get transcript (verifies ownership)
+    const transcript = await databaseService.getTranscript(transcriptId, req.user.id);
+    
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+
+    // Check if interview details are available
+    if (!transcript.interviewDetails?.isUpdated) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please update interview details before regenerating debrief'
+      });
+    }
+
+    // Generate new debrief with updated interview details
+    const result = await aiService.generateInterviewDebrief(
+      transcript.content,
+      transcript.interviewDetails,
+      transcript.createdAt
+    );
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+    // Save new debrief to database
+    await databaseService.updateTranscript(transcriptId, req.user.id, {
+      debrief: result.debrief
+    });
+
+    logger.info('📊 Debrief regenerated with interview details', {
+      transcriptId,
+      userId: req.user.id,
+      debriefLength: result.debrief.content.length,
+      hasInterviewDetails: true
+    });
+
+    res.json({
+      success: true,
+      message: 'Debrief regenerated successfully with interview details',
+      debrief: result.debrief
+    });
+  })
+);
+
+/**
  * POST /api/ai/analyze/:transcriptId
  * Generate comprehensive analysis (summary + debrief + Q&A)
  */
@@ -593,7 +663,11 @@ router.post('/analyze/:transcriptId',
 
     // Generate debrief if not exists
     if (!transcript.debrief?.content) {
-      const debriefResult = await aiService.generateInterviewDebrief(transcript.content);
+      const debriefResult = await aiService.generateInterviewDebrief(
+        transcript.content,
+        transcript.interviewDetails || {},
+        transcript.createdAt
+      );
       if (debriefResult.success) {
         analysis.debrief = debriefResult.debrief;
         await databaseService.updateTranscript(transcriptId, req.user.id, {
