@@ -21,7 +21,7 @@ class AudioService {
     const DEFAULT_UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../../uploads');
     const DEFAULT_MAX_FILE_SIZE = process.env.UPLOAD_MAX_FILE_SIZE || '200MB';
     const DEFAULT_MODEL = process.env.OPENAI_AUDIO_MODEL || 'whisper-1';
-    const DEFAULT_SEGMENT_SECONDS = parseInt(process.env.TRANSCRIBE_SEGMENT_SECONDS || '600', 10); // 10 min
+    const DEFAULT_SEGMENT_SECONDS = parseInt(process.env.TRANSCRIBE_SEGMENT_SECONDS || '65', 10); // 1 min + 5s buffer
     const DEFAULT_BITRATE = process.env.TRANSCODE_BITRATE || '48k';
 
     this.config = {
@@ -58,7 +58,7 @@ class AudioService {
     if (!this.config.apis.openai) {
       this.logger.error('❌ OpenAI API key is missing. Audio transcription will not work.');
       this.openai = null;
-        } else {
+    } else {
       this.openai = new OpenAI({
         apiKey: this.config.apis.openai,
         timeout: 120000, // 2 min
@@ -70,22 +70,22 @@ class AudioService {
     this.uploadPath = this.config.upload.dir;
     this.maxFileSize = this._parseFileSize(this.config.upload.maxFileSize);
     this.allowedFormats = this.config.upload.allowedFormats;
-    
+
     // Ensure upload dir
     fs.ensureDirSync(this.uploadPath);
-    
+
     this.logger.info('🎵 AudioService initialized');
-    
+
     // Warmup: verify OpenAI model availability after short delay
     if (this.openai) {
       setTimeout(() => {
-      this._testOpenAIConnection()
+        this._testOpenAIConnection()
           .then(ok => {
             if (ok) this.logger.info('✅ OpenAI API connection verified');
-        })
+          })
           .catch(err => {
             this.logger.warn('⚠️ OpenAI API connection test failed (service may still work):', err?.message);
-        });
+          });
       }, 5000);
     } else {
       this.logger.error('❌ OpenAI API key is missing. Transcription features disabled.');
@@ -167,8 +167,8 @@ class AudioService {
           const res = await this._transcribeSingleFile(segPath, options);
           if (!res.success) {
             throw new Error(`Segment transcription failed: ${res.error}`);
-        }
-        
+          }
+
           // offset segments
           const segs = (res.segments || []).map(s => ({
             ...s,
@@ -234,7 +234,7 @@ class AudioService {
 
       if (!inputAudioPath) throw new Error('Input audio file is required');
 
-        await fs.access(inputAudioPath, fs.constants.R_OK);
+      await fs.access(inputAudioPath, fs.constants.R_OK);
       if (outputAudioPath) await fs.access(outputAudioPath, fs.constants.R_OK);
 
       const [inputStats, outputStats] = await Promise.all([
@@ -440,7 +440,7 @@ class AudioService {
 
       // Force English transcription with explicit prompt
       const englishPrompt = "This is an English audio recording. Please transcribe in English only, using English script. Do not use any other language scripts like Hindi, Devanagari, or other non-Latin alphabets.";
-      
+
       const req = {
         file: audioStream,
         model,
@@ -469,7 +469,7 @@ class AudioService {
         file: audioFilePath,
         model: options.model || this.config.openai.audioModel
       });
-      
+
       const friendly = this._mapOpenAIError(err);
       return { success: false, error: friendly.hint || err.message, code: friendly.code, status: friendly.status };
     }
@@ -495,7 +495,7 @@ class AudioService {
     // Filter out segments with empty text to prevent validation errors
     segments = segments.filter(segment => segment.text && segment.text.trim().length > 0);
 
-    const duration = segments.length > 0 
+    const duration = segments.length > 0
       ? Math.max(...segments.map(s => s.end || 0))
       : this._estimateDurationFromText(transcription.text);
 
@@ -528,9 +528,9 @@ class AudioService {
         if (boundary) {
           const segmentText = current.text.trim();
           if (segmentText && segmentText.length > 0) {
-            segments.push({ 
-              start: current.start, 
-              end: current.end, 
+            segments.push({
+              start: current.start,
+              end: current.end,
               text: segmentText,
               source: source,
               speaker: speaker
@@ -544,9 +544,9 @@ class AudioService {
     if (current) {
       const segmentText = current.text.trim();
       if (segmentText && segmentText.length > 0) {
-        segments.push({ 
-          start: current.start, 
-          end: current.end, 
+        segments.push({
+          start: current.start,
+          end: current.end,
           text: segmentText,
           source: source,
           speaker: speaker
@@ -565,9 +565,9 @@ class AudioService {
       const trimmedSentence = sentence.trim();
       if (trimmedSentence && trimmedSentence.length > 0) {
         const d = Math.max(2, trimmedSentence.length * 0.05);
-        segs.push({ 
-          start: t, 
-          end: t + d, 
+        segs.push({
+          start: t,
+          end: t + d,
           text: trimmedSentence,
           source: source,
           speaker: speaker
@@ -580,25 +580,25 @@ class AudioService {
 
   _mergeSegmentsByTimestamp(inputSegments, outputSegments, opts = {}) {
     const all = [...(inputSegments || []), ...(outputSegments || [])];
-    
+
     // Debug: Log input segments before merge
     this.logger.info('🔍 Input segments before merge:', {
       inputSegments: inputSegments?.map(s => ({ text: s.text?.substring(0, 30) + '...', source: s.source, speaker: s.speaker, start: s.start, end: s.end })) || [],
       outputSegments: outputSegments?.map(s => ({ text: s.text?.substring(0, 30) + '...', source: s.source, speaker: s.speaker, start: s.start, end: s.end })) || []
     });
-    
+
     all.sort((a, b) => (a.start || 0) - (b.start || 0));
-    
-          const dedup = this._removeDuplicateSegments(all);
-      
-      // Debug: Log deduplication results
-      this.logger.info('🔍 Deduplication results:', {
-        totalSegmentsBefore: all.length,
-        totalSegmentsAfter: dedup.length,
-        removedDuplicates: all.length - dedup.length,
-        sampleSegmentsAfter: dedup.slice(0, 5).map(s => ({ text: s.text?.substring(0, 30) + '...', source: s.source, speaker: s.speaker, start: s.start, end: s.end }))
-      });
-    
+
+    const dedup = this._removeDuplicateSegments(all);
+
+    // Debug: Log deduplication results
+    this.logger.info('🔍 Deduplication results:', {
+      totalSegmentsBefore: all.length,
+      totalSegmentsAfter: dedup.length,
+      removedDuplicates: all.length - dedup.length,
+      sampleSegmentsAfter: dedup.slice(0, 5).map(s => ({ text: s.text?.substring(0, 30) + '...', source: s.source, speaker: s.speaker, start: s.start, end: s.end }))
+    });
+
     if (!opts.gapPause) return dedup;
 
     // Optionally inject [pause] markers for large gaps (readability)
@@ -608,9 +608,9 @@ class AudioService {
       const curr = dedup[i];
       const prev = result[result.length - 1];
       if (prev && (curr.start - prev.end) > GAP_SEC) {
-        result.push({ 
-          start: prev.end, 
-          end: curr.start, 
+        result.push({
+          start: prev.end,
+          end: curr.start,
           text: '[pause]',
           source: 'input', // Default source for pause segments
           speaker: 'system'
@@ -623,10 +623,10 @@ class AudioService {
 
   _removeDuplicateSegments(segments) {
     if (segments.length === 0) return segments;
-    
+
     // Sort segments by timestamp to ensure proper processing order
     const sortedSegments = [...segments].sort((a, b) => (a.start || 0) - (b.start || 0));
-    
+
     const out = [];
     const timeWindow = 30.0; // Increased time window to handle larger gaps between mic/system audio (covers cases like 5.8s vs 27.6s)
     const threshold = 0.7; // Slightly lowered threshold to catch more similar phrases
@@ -647,16 +647,16 @@ class AudioService {
       let dup = false;
       let dupIndex = -1;
       let bestSimilarity = 0;
-      
+
       // Check for duplicates across the entire output array within time window
       for (let i = 0; i < out.length; i++) {
         const ex = out[i];
         const timeDiff = Math.abs((seg.start || 0) - (ex.start || 0));
-        
+
         // Only check segments within the time window
         if (timeDiff <= timeWindow) {
           const sim = this._textSim(seg.text || '', ex.text || '');
-          
+
           // Debug logging for your case
           if (seg.source === 'output' && ex.source === 'output') {
             this.logger.info('🔍 Checking SYS vs SYS similarity:', {
@@ -669,15 +669,15 @@ class AudioService {
               willBeDuplicate: sim > threshold
             });
           }
-          
-          if (sim > threshold && sim > bestSimilarity) { 
-            dup = true; 
+
+          if (sim > threshold && sim > bestSimilarity) {
+            dup = true;
             dupIndex = i;
             bestSimilarity = sim;
           }
         }
       }
-      
+
       if (!dup) {
         // No duplicate found, add the segment
         out.push(seg);
@@ -691,7 +691,7 @@ class AudioService {
         // Duplicate found - prioritize system audio over microphone audio
         const existingSegment = out[dupIndex];
         const newSegment = seg;
-        
+
         this.logger.info('🔍 Duplicate detected:', {
           existingText: existingSegment.text?.substring(0, 50) + '...',
           newText: newSegment.text?.substring(0, 50) + '...',
@@ -705,7 +705,7 @@ class AudioService {
           existingTextFull: existingSegment.text,
           newTextFull: newSegment.text
         });
-        
+
         // If new segment is system audio and existing is microphone, replace it
         if (newSegment.source === 'output' && existingSegment.source === 'input') {
           this.logger.info('🔄 Replacing MIC segment with SYS segment due to duplication:', {
@@ -741,19 +741,19 @@ class AudioService {
         }
       }
     }
-    
+
     this.logger.info('🔍 Deduplication complete:', {
       originalCount: sortedSegments.length,
       finalCount: out.length,
       removedCount: sortedSegments.length - out.length
     });
-    
+
     return out;
   }
 
   _textSim(a, b) {
     if (!a || !b) return 0;
-    
+
     // Normalize text for better comparison
     const normalize = (text) => {
       return text.toLowerCase()
@@ -762,45 +762,45 @@ class AudioService {
         .replace(/\s+/g, ' ') // Normalize whitespace
         .trim();
     };
-    
+
     const normalized1 = normalize(a);
     const normalized2 = normalize(b);
-    
+
     // Use both word-level and character-level similarity
     const words1 = new Set(normalized1.split(/\s+/));
     const words2 = new Set(normalized2.split(/\s+/));
     const wordsInter = new Set([...words1].filter(x => words2.has(x)));
     const wordsUni = new Set([...words1, ...words2]);
     const wordSimilarity = wordsInter.size / wordsUni.size;
-    
+
     // Simple character-level Jaccard similarity for additional context
     const chars1 = new Set(normalized1.replace(/\s/g, ''));
     const chars2 = new Set(normalized2.replace(/\s/g, ''));
     const charsInter = new Set([...chars1].filter(x => chars2.has(x)));
     const charsUni = new Set([...chars1, ...chars2]);
     const charSimilarity = charsInter.size / charsUni.size;
-    
+
     // Additional: Check for partial phrase matches (important for your case)
     const partialMatch = this._checkPartialPhraseMatch(normalized1, normalized2);
-    
+
     // Weighted combination (favor word similarity and partial matches)
     const combinedSimilarity = (wordSimilarity * 0.6) + (charSimilarity * 0.2) + (partialMatch * 0.2);
-    
+
     return combinedSimilarity;
   }
 
   _checkPartialPhraseMatch(text1, text2) {
     if (!text1 || !text2) return 0;
-    
+
     // Split into phrases and check for significant overlap
     const phrases1 = text1.split(/[.,;]/).map(p => p.trim()).filter(p => p.length > 3);
     const phrases2 = text2.split(/[.,;]/).map(p => p.trim()).filter(p => p.length > 3);
-    
+
     if (phrases1.length === 0 || phrases2.length === 0) return 0;
-    
+
     let totalSimilarity = 0;
     let comparisons = 0;
-    
+
     for (const phrase1 of phrases1) {
       for (const phrase2 of phrases2) {
         if (phrase1.length > 5 && phrase2.length > 5) { // Only compare substantial phrases
@@ -809,7 +809,7 @@ class AudioService {
           const inter = new Set([...words1].filter(x => words2.has(x)));
           const uni = new Set([...words1, ...words2]);
           const phraseSim = inter.size / uni.size;
-          
+
           if (phraseSim > 0.5) { // Only count meaningful matches
             totalSimilarity += phraseSim;
             comparisons++;
@@ -817,7 +817,7 @@ class AudioService {
         }
       }
     }
-    
+
     return comparisons > 0 ? totalSimilarity / comparisons : 0;
   }
 
@@ -879,10 +879,10 @@ class AudioService {
     else if (status === 429) { code = 'RATE_LIMIT'; hint = 'Rate limited. Back off and retry using Retry-After header.'; }
     else if (status >= 500) { code = 'SERVER_ERROR'; hint = 'Temporary server issue. Retry with backoff.'; }
 
-    this.logger.error('OpenAI error:', { 
-      status, 
-      type, 
-      code, 
+    this.logger.error('OpenAI error:', {
+      status,
+      type,
+      code,
       hint,
       message: err?.message,
       stack: err?.stack,
@@ -940,7 +940,7 @@ class AudioService {
   }
 
   async _transcodeAudio(input, output) {
-          this.logger.info('🎛️ Transcoding audio (mono, 6kHz)...');
+    this.logger.info('🎛️ Transcoding audio (mono, 6kHz)...');
     await this._runFfmpeg([
       '-y',
       '-i', input,
@@ -954,7 +954,7 @@ class AudioService {
     return output;
   }
 
-  async _segmentAudio(input, outDir, seconds = 600) {
+  async _segmentAudio(input, outDir, seconds = 65) {
     this.logger.info(`✂️  Segmenting audio into ~${seconds}s chunks...`);
     const pattern = path.join(outDir, 'chunk-%03d.m4a');
     await this._runFfmpeg([
@@ -1084,7 +1084,7 @@ class AudioService {
   async _compressAudio(inputPath) {
     try {
       const outputPath = inputPath.replace(/\.[^/.]+$/, '_compressed.m4a');
-      
+
       await this._runFfmpeg([
         '-i', inputPath,
         '-c:a', 'aac',
@@ -1130,18 +1130,18 @@ class AudioService {
 
       // Get file stats before deletion
       const stats = await fs.stat(filePath);
-      
+
       // Delete the file
       await fs.unlink(filePath);
-      
+
       this.logger.info('🗑️ Audio file deleted successfully', {
         path: filePath,
         size: stats.size,
         deletedAt: new Date()
       });
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: 'Audio file deleted successfully',
         deletedSize: stats.size
       };
@@ -1150,10 +1150,10 @@ class AudioService {
         path: filePath,
         error: error.message
       });
-      
-      return { 
-        success: false, 
-        error: `Failed to delete audio file: ${error.message}` 
+
+      return {
+        success: false,
+        error: `Failed to delete audio file: ${error.message}`
       };
     }
   }
