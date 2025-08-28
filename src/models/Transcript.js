@@ -91,7 +91,7 @@ const transcriptSchema = new mongoose.Schema({
     maxlength: [5000, 'Summary cannot exceed 5000 characters']
   },
   debrief: debriefSchema,
-  
+
   // New interview details fields
   interviewDetails: {
     companyName: {
@@ -101,7 +101,23 @@ const transcriptSchema = new mongoose.Schema({
     },
     round: {
       type: String,
-      enum: ['Screening', 'Technical Round 1', 'Technical Round 2', 'System Design', 'Behavioral', 'Final Round', 'HR Round', 'Other'],
+      enum: [
+        'Screening',
+        'Technical Round 1',
+        'Technical Round 2',
+        'Technical Round 3',
+        'System Design',
+        'Coding Round',
+        'Behavioral',
+        'Final Round',
+        'HR Round',
+        'CTO Round',
+        'CEO Round',
+        'Manager Round',
+        'Panel Interview',
+        'Culture Fit',
+        'Other'
+      ],
       trim: true
     },
     interviewerName: {
@@ -127,7 +143,7 @@ const transcriptSchema = new mongoose.Schema({
       type: Date
     }
   },
-  
+
   aiAnalysis: {
     sentiment: String,
     keyTopics: [{
@@ -178,7 +194,7 @@ const transcriptSchema = new mongoose.Schema({
 });
 
 // Ensure consistency between _id and id
-transcriptSchema.pre('save', function(next) {
+transcriptSchema.pre('save', function (next) {
   if (!this.id) {
     this.id = this._id;
   }
@@ -186,7 +202,7 @@ transcriptSchema.pre('save', function(next) {
 });
 
 // Update interview details tracking
-transcriptSchema.pre('save', function(next) {
+transcriptSchema.pre('save', function (next) {
   // Check if interview details have been modified
   if (this.isModified('interviewDetails')) {
     this.interviewDetails.isUpdated = true;
@@ -204,7 +220,7 @@ transcriptSchema.index({ 'interviewDetails.companyName': 1 });
 transcriptSchema.index({ 'interviewDetails.round': 1 });
 
 // Update segmentCount when segments change
-transcriptSchema.pre('save', function(next) {
+transcriptSchema.pre('save', function (next) {
   if (this.isModified('segments')) {
     this.metadata.segmentCount = this.segments.length;
   }
@@ -212,12 +228,12 @@ transcriptSchema.pre('save', function(next) {
 });
 
 // Static method to find by custom id
-transcriptSchema.statics.findByCustomId = function(id) {
+transcriptSchema.statics.findByCustomId = function (id) {
   return this.findOne({ id });
 };
 
 // Static method to get user transcripts with pagination
-transcriptSchema.statics.getUserTranscripts = function(userId, options = {}) {
+transcriptSchema.statics.getUserTranscripts = function (userId, options = {}) {
   const {
     limit = 50,
     offset = 0,
@@ -240,7 +256,7 @@ transcriptSchema.statics.getUserTranscripts = function(userId, options = {}) {
 };
 
 // Instance method to get summary statistics
-transcriptSchema.methods.getStats = function() {
+transcriptSchema.methods.getStats = function () {
   return {
     id: this.id,
     duration: this.metadata.duration || 0,
@@ -255,7 +271,12 @@ transcriptSchema.methods.getStats = function() {
 };
 
 // Instance method to update interview details
-transcriptSchema.methods.updateInterviewDetails = function(details) {
+transcriptSchema.methods.updateInterviewDetails = async function (details) {
+  // Initialize interviewDetails if it doesn't exist
+  if (!this.interviewDetails) {
+    this.interviewDetails = {};
+  }
+
   // Update only the provided fields
   if (details.companyName !== undefined) {
     this.interviewDetails.companyName = details.companyName;
@@ -272,26 +293,35 @@ transcriptSchema.methods.updateInterviewDetails = function(details) {
   if (details.performanceRating !== undefined) {
     this.interviewDetails.performanceRating = details.performanceRating;
   }
-  
+
   // Mark as updated
   this.interviewDetails.isUpdated = true;
   this.interviewDetails.updatedAt = new Date();
-  
-  return this.save();
+
+  // Mark the path as modified for nested objects
+  this.markModified('interviewDetails');
+
+  try {
+    const saved = await this.save();
+    return saved;
+  } catch (error) {
+    console.error('❌ Error saving interview details:', error);
+    throw error;
+  }
 };
 
 // Instance method to get interview details
-transcriptSchema.methods.getInterviewDetails = function() {
+transcriptSchema.methods.getInterviewDetails = function () {
   return this.interviewDetails || {};
 };
 
 // Virtual for word count
-transcriptSchema.virtual('wordCount').get(function() {
+transcriptSchema.virtual('wordCount').get(function () {
   return this.content ? this.content.split(/\s+/).length : 0;
 });
 
 // Virtual for estimated reading time (assuming 200 wpm)
-transcriptSchema.virtual('estimatedReadingTime').get(function() {
+transcriptSchema.virtual('estimatedReadingTime').get(function () {
   const wordsPerMinute = 200;
   const wordCount = this.wordCount;
   return Math.ceil(wordCount / wordsPerMinute);
@@ -300,7 +330,7 @@ transcriptSchema.virtual('estimatedReadingTime').get(function() {
 // Ensure virtual fields are serialized
 transcriptSchema.set('toJSON', {
   virtuals: true,
-  transform: function(doc, ret) {
+  transform: function (doc, ret) {
     delete ret._id;
     delete ret.__v;
     return ret;

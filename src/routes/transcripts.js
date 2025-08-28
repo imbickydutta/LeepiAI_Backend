@@ -4,6 +4,7 @@ const { authenticate } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireDatabase } = require('../middleware/databaseCheck');
 const databaseService = require('../services/DatabaseService');
+const Transcript = require('../models/Transcript');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -111,7 +112,7 @@ router.get('/:id',
   requireDatabase,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    
+
     const transcript = await databaseService.getTranscript(id, req.user.id);
 
     res.json({
@@ -200,9 +201,9 @@ router.get('/:id/stats',
   requireDatabase,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    
+
     const transcript = await databaseService.getTranscript(id, req.user.id);
-    
+
     // Calculate statistics
     const stats = {
       id: transcript.id,
@@ -240,9 +241,9 @@ router.post('/:id/export',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { format, includeAnalysis = true } = req.body;
-    
+
     const transcript = await databaseService.getTranscript(id, req.user.id);
-    
+
     let content = '';
     let mimeType = 'text/plain';
     let filename = `interview-transcript-${transcript.id}`;
@@ -277,7 +278,7 @@ router.post('/:id/export',
         content += `**Duration:** ${transcript.metadata?.duration || 0} seconds\n\n`;
         content += '## Transcript\n\n';
         content += transcript.content.replace(/\n/g, '\n\n');
-        
+
         if (includeAnalysis && transcript.summary) {
           content += '\n\n## Summary\n\n' + transcript.summary;
         }
@@ -323,8 +324,8 @@ router.put('/:id/interview-details',
     const { id } = req.params;
     const updateData = req.body;
 
-    // Get the transcript
-    const transcript = await databaseService.getTranscriptById(id, req.user.id);
+    // Get the transcript to verify it exists
+    const transcript = await Transcript.findOne({ id, userId: req.user.id });
     if (!transcript) {
       return res.status(404).json({
         success: false,
@@ -332,8 +333,23 @@ router.put('/:id/interview-details',
       });
     }
 
-    // Update interview details
-    const updatedTranscript = await transcript.updateInterviewDetails(updateData);
+    // Prepare interview details update
+    const interviewDetailsUpdate = {
+      ...updateData,
+      isUpdated: true,
+      updatedAt: new Date()
+    };
+
+    // Update interview details using findOneAndUpdate to avoid _id issues
+    const updatedTranscript = await Transcript.findOneAndUpdate(
+      { id, userId: req.user.id },
+      {
+        $set: {
+          interviewDetails: interviewDetailsUpdate
+        }
+      },
+      { new: true }
+    );
 
     logger.info('📝 Interview details updated', {
       transcriptId: id,
@@ -343,11 +359,7 @@ router.put('/:id/interview-details',
 
     res.json({
       success: true,
-      message: 'Interview details updated successfully',
-      transcript: {
-        id: updatedTranscript.id,
-        interviewDetails: updatedTranscript.interviewDetails
-      }
+      interviewDetails: updatedTranscript.interviewDetails
     });
   })
 );
@@ -362,8 +374,8 @@ router.get('/:id/interview-details',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
-    // Get the transcript
-    const transcript = await databaseService.getTranscriptById(id, req.user.id);
+    // Get the transcript (need full document, not lean, for methods)
+    const transcript = await Transcript.findOne({ id, userId: req.user.id });
     if (!transcript) {
       return res.status(404).json({
         success: false,
@@ -392,7 +404,7 @@ router.post('/bulk-delete',
   handleValidationErrors,
   asyncHandler(async (req, res) => {
     const { transcriptIds } = req.body;
-    
+
     const results = {
       deleted: [],
       failed: []
