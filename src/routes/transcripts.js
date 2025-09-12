@@ -422,6 +422,94 @@ router.get('/:id/interview-details',
 );
 
 /**
+ * PUT /api/transcripts/admin/:id/interview-details
+ * Admin endpoint to update interview details for any transcript
+ */
+router.put('/admin/:id/interview-details',
+  authenticate,
+  requireAdmin,
+  requireDatabase,
+  [
+    body('companyName').optional().isString().trim().isLength({ max: 100 }).withMessage('Company name cannot exceed 100 characters'),
+    body('round').optional().isIn(['Screening', 'Technical Round 1', 'Technical Round 2', 'Technical Round 3', 'System Design', 'Coding Round', 'Behavioral', 'Final Round', 'HR Round', 'CTO Round', 'CEO Round', 'Manager Round', 'Panel Interview', 'Culture Fit', 'Other']).withMessage('Invalid round type'),
+    body('interviewerName').optional().isString().trim().isLength({ max: 100 }).withMessage('Interviewer name cannot exceed 100 characters'),
+    body('studentName').optional().isString().trim().isLength({ max: 100 }).withMessage('Student name cannot exceed 100 characters'),
+    body('performanceRating').optional().isInt({ min: 1, max: 10 }).withMessage('Performance rating must be between 1 and 10')
+  ],
+  handleValidationErrors,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Get the transcript (admin can access any transcript)
+    const transcript = await Transcript.findOne({ id });
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+
+    // Prepare interview details update
+    const interviewDetailsUpdate = {
+      ...updateData,
+      isUpdated: true,
+      updatedAt: new Date()
+    };
+
+    // Update interview details using findOneAndUpdate to avoid _id issues
+    const updatedTranscript = await Transcript.findOneAndUpdate(
+      { id },
+      {
+        $set: {
+          interviewDetails: interviewDetailsUpdate
+        }
+      },
+      { new: true }
+    );
+
+    logger.info('📝 Interview details updated by admin', {
+      transcriptId: id,
+      adminId: req.user.id,
+      originalUserId: transcript.userId,
+      updatedFields: Object.keys(updateData)
+    });
+
+    res.json({
+      success: true,
+      interviewDetails: updatedTranscript.interviewDetails
+    });
+  })
+);
+
+/**
+ * GET /api/transcripts/admin/:id/interview-details
+ * Admin endpoint to get interview details for any transcript
+ */
+router.get('/admin/:id/interview-details',
+  authenticate,
+  requireAdmin,
+  requireDatabase,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Get the transcript (admin can access any transcript)
+    const transcript = await Transcript.findOne({ id });
+    if (!transcript) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transcript not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      interviewDetails: transcript.getInterviewDetails()
+    });
+  })
+);
+
+/**
  * POST /api/transcripts/bulk-delete
  * Delete multiple transcripts
  */
