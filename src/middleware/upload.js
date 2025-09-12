@@ -26,7 +26,7 @@ const audioFileFilter = (req, file, cb) => {
   // Check file extension
   const allowedExtensions = config.upload.allowedFormats.map(ext => `.${ext}`);
   const fileExtension = path.extname(file.originalname).toLowerCase();
-  
+
   if (!allowedExtensions.includes(fileExtension)) {
     const error = new Error(`Invalid file type. Allowed formats: ${config.upload.allowedFormats.join(', ')}`);
     error.code = 'INVALID_FILE_TYPE';
@@ -61,7 +61,7 @@ const parseFileSize = (sizeString) => {
   const units = { B: 1, KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
   const match = sizeString.match(/^(\d+)\s*(B|KB|MB|GB)$/i);
   if (!match) return 200 * 1024 * 1024; // Default 200MB
-  
+
   const [, value, unit] = match;
   return parseInt(value) * (units[unit.toUpperCase()] || 1);
 };
@@ -82,11 +82,11 @@ const upload = multer({
 const uploadSingleAudio = (fieldName = 'audio') => {
   return (req, res, next) => {
     const uploadSingle = upload.single(fieldName);
-    
+
     uploadSingle(req, res, (error) => {
       if (error) {
         logger.error('❌ File upload error:', error);
-        
+
         if (error instanceof multer.MulterError) {
           switch (error.code) {
             case 'LIMIT_FILE_SIZE':
@@ -152,11 +152,11 @@ const uploadDualAudio = () => {
       { name: 'inputAudio', maxCount: 1 },
       { name: 'outputAudio', maxCount: 1 }
     ]);
-    
+
     uploadFields(req, res, (error) => {
       if (error) {
         logger.error('❌ Dual file upload error:', error);
-        
+
         if (error instanceof multer.MulterError) {
           switch (error.code) {
             case 'LIMIT_FILE_SIZE':
@@ -198,7 +198,7 @@ const uploadDualAudio = () => {
 
       // Validate that we have the expected files
       const { inputAudio, outputAudio } = req.files;
-      
+
       if (!inputAudio && !outputAudio) {
         return res.status(400).json({
           success: false,
@@ -227,11 +227,11 @@ const uploadMicSystemAudio = () => {
       { name: 'microphone', maxCount: 1 },
       { name: 'system', maxCount: 1 }
     ]);
-    
+
     uploadFields(req, res, (error) => {
       if (error) {
         logger.error('❌ Mic/System audio upload error:', error);
-        
+
         if (error instanceof multer.MulterError) {
           switch (error.code) {
             case 'LIMIT_FILE_SIZE':
@@ -273,7 +273,7 @@ const uploadMicSystemAudio = () => {
 
       // Validate that we have the expected files
       const { microphone, system } = req.files;
-      
+
       if (!microphone && !system) {
         return res.status(400).json({
           success: false,
@@ -303,19 +303,19 @@ const uploadSegmentedDualAudio = () => {
       fileFilter: audioFileFilter,
       limits: {
         fileSize: parseFileSize(config.upload.maxFileSize),
-        files: 200 // Allow up to 200 files for segmented uploads (100 segments × 2 files each)
+        files: 240 // Allow up to 240 files for segmented uploads (120 segments × 2 files each)
       }
     });
 
     const uploadFields = segmentedUpload.fields([
-      { name: 'microphone', maxCount: 100 }, // Allow up to 100 microphone segments
-      { name: 'system', maxCount: 100 }      // Allow up to 100 system segments
+      { name: 'microphone', maxCount: 120 }, // Allow up to 120 microphone segments (2+ hours at 1min per chunk)
+      { name: 'system', maxCount: 120 }      // Allow up to 120 system segments (2+ hours at 1min per chunk)
     ]);
-    
+
     uploadFields(req, res, (error) => {
       if (error) {
         logger.error('❌ Segmented dual audio upload error:', error);
-        
+
         if (error instanceof multer.MulterError) {
           switch (error.code) {
             case 'LIMIT_FILE_SIZE':
@@ -357,7 +357,7 @@ const uploadSegmentedDualAudio = () => {
 
       // Validate that we have the expected files
       const { microphone, system } = req.files;
-      
+
       if (!microphone || microphone.length === 0) {
         return res.status(400).json({
           success: false,
@@ -399,20 +399,20 @@ const cleanupFiles = async (files) => {
 const handleUploadError = (error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     logger.error('❌ Multer error:', error);
-    
+
     // Cleanup any uploaded files
     if (req.file) cleanupFiles([req.file]);
     if (req.files) {
       const allFiles = Object.values(req.files).flat();
       cleanupFiles(allFiles);
     }
-    
+
     return res.status(400).json({
       success: false,
       error: 'File upload error: ' + error.message
     });
   }
-  
+
   next(error);
 };
 
