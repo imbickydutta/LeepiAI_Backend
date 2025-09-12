@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, query, validationResult } = require('express-validator');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireDatabase } = require('../middleware/databaseCheck');
 const databaseService = require('../services/DatabaseService');
@@ -176,6 +176,37 @@ router.delete('/:id',
       logger.info('🗑️ Transcript deleted via API', {
         transcriptId: id,
         userId: req.user.id
+      });
+
+      return res.json({
+        success: true,
+        message: 'Transcript deleted successfully'
+      });
+    } catch (error) {
+      if (error && error.message === 'Transcript not found') {
+        return res.status(404).json({ success: false, error: 'Transcript not found' });
+      }
+      throw error;
+    }
+  })
+);
+
+/**
+ * DELETE /api/transcripts/admin/:id
+ * Admin endpoint to delete any transcript
+ */
+router.delete('/admin/:id',
+  authenticate,
+  requireAdmin,
+  requireDatabase,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    try {
+      await databaseService.deleteTranscriptAsAdmin(id);
+
+      logger.info('🗑️ Transcript deleted by admin via API', {
+        transcriptId: id,
+        adminId: req.user.id
       });
 
       return res.json({
@@ -409,6 +440,51 @@ router.post('/bulk-delete',
 
     logger.info('🗑️ Bulk transcript deletion', {
       userId: req.user.id,
+      requested: transcriptIds.length,
+      deleted: results.deleted.length,
+      failed: results.failed.length
+    });
+
+    res.json({
+      success: true,
+      message: `Deleted ${results.deleted.length} of ${transcriptIds.length} transcripts`,
+      results
+    });
+  })
+);
+
+/**
+ * POST /api/transcripts/admin/bulk-delete
+ * Admin endpoint to bulk delete any transcripts
+ */
+router.post('/admin/bulk-delete',
+  authenticate,
+  requireAdmin,
+  requireDatabase,
+  [
+    body('transcriptIds').isArray({ min: 1 }).withMessage('Must provide array of transcript IDs'),
+    body('transcriptIds.*').isString().withMessage('Each transcript ID must be a string')
+  ],
+  handleValidationErrors,
+  asyncHandler(async (req, res) => {
+    const { transcriptIds } = req.body;
+    
+    const results = {
+      deleted: [],
+      failed: []
+    };
+
+    for (const id of transcriptIds) {
+      try {
+        await databaseService.deleteTranscriptAsAdmin(id);
+        results.deleted.push(id);
+      } catch (error) {
+        results.failed.push({ id, error: error.message });
+      }
+    }
+
+    logger.info('🗑️ Bulk transcript deletion by admin', {
+      adminId: req.user.id,
       requested: transcriptIds.length,
       deleted: results.deleted.length,
       failed: results.failed.length

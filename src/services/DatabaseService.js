@@ -328,6 +328,35 @@ class DatabaseService {
     }
   }
 
+  async deleteTranscriptAsAdmin(transcriptId) {
+    try {
+      // First, get the transcript to find the original userId for logging
+      const transcript = await Transcript.findOne({ id: transcriptId });
+      if (!transcript) {
+        throw new Error('Transcript not found');
+      }
+
+      const result = await Transcript.deleteOne({ id: transcriptId });
+      
+      if (result.deletedCount === 0) {
+        throw new Error('Transcript not found');
+      }
+
+      // Also delete associated chat history
+      await ChatHistory.deleteMany({ transcriptId });
+
+      logger.info('🗑️ Transcript deleted by admin', {
+        transcriptId,
+        originalUserId: transcript.userId
+      });
+
+      return { success: true };
+    } catch (error) {
+      logger.error('❌ Failed to delete transcript as admin:', error);
+      throw error;
+    }
+  }
+
   // =====================================================
   // CHAT HISTORY OPERATIONS
   // =====================================================
