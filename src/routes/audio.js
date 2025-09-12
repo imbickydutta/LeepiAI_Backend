@@ -538,11 +538,28 @@ router.post('/upload-segmented-dual',
             willCallTranscribeDual: !!sysFile
           });
 
-          // Process dual audio for this segment
-          const transcriptionResult = await audioService.transcribeDualAudio(
-            micFile.path,
-            sysFile?.path || null
-          );
+          // Process audio for this segment (single or dual)
+          let transcriptionResult;
+          if (sysFile && sysFile.size > 0) {
+            // Dual audio processing
+            transcriptionResult = await audioService.transcribeDualAudio(
+              micFile.path,
+              sysFile.path
+            );
+          } else {
+            // Single audio processing (microphone only)
+            transcriptionResult = await audioService.transcribeAudio(micFile.path);
+            // Convert single audio result to dual audio format for consistency
+            if (transcriptionResult.success) {
+              transcriptionResult.inputSegments = transcriptionResult.segments.map(seg => ({
+                ...seg,
+                source: 'input'
+              }));
+              transcriptionResult.outputSegments = [];
+              transcriptionResult.mergedSegments = transcriptionResult.inputSegments;
+              transcriptionResult.totalDuration = transcriptionResult.duration;
+            }
+          }
 
           if (!transcriptionResult.success) {
             logger.error(`❌ Transcription failed for segment ${i + 1}:`, {

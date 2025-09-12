@@ -41,7 +41,7 @@ class AudioService {
       transcode: {
         enable: true,        // try to transcode if too large/unsupported
         bitrate: DEFAULT_BITRATE,
-        sampleRate: 6000,    // target 6 kHz (reduced from 16kHz for efficiency)
+        sampleRate: 16000,   // target 16 kHz (OpenAI's preferred rate)
         channels: 1,         // mono
       },
       segment: {

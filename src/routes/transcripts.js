@@ -422,4 +422,70 @@ router.post('/bulk-delete',
   })
 );
 
+/**
+ * GET /api/transcripts/admin/all
+ * Get all transcripts from all users (admin only)
+ */
+router.get('/admin/all',
+  authenticate,
+  requireDatabase,
+  [
+    query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
+    query('offset').optional().isInt({ min: 0 }).withMessage('Offset must be non-negative'),
+    query('sortBy').optional().isIn(['createdAt', 'updatedAt', 'title', 'duration']).withMessage('Invalid sort field'),
+    query('sortOrder').optional().isIn(['asc', 'desc']).withMessage('Sort order must be asc or desc'),
+    query('includeSegments').optional().isBoolean().withMessage('includeSegments must be boolean'),
+    query('userId').optional().isString().withMessage('userId must be a string'),
+    query('hasSummary').optional().isBoolean().withMessage('hasSummary must be boolean'),
+    query('hasDebrief').optional().isBoolean().withMessage('hasDebrief must be boolean'),
+    query('search').optional().isString().withMessage('search must be a string')
+  ],
+  handleValidationErrors,
+  asyncHandler(async (req, res) => {
+    // Check if user is admin
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Admin access required'
+      });
+    }
+
+    const {
+      limit = 20,
+      offset = 0,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      includeSegments = false,
+      userId = null,
+      hasSummary = null,
+      hasDebrief = null,
+      search = null
+    } = req.query;
+
+    const options = {
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      sortBy,
+      sortOrder: sortOrder === 'desc' ? -1 : 1,
+      includeSegments: includeSegments === 'true',
+      userId,
+      hasSummary: hasSummary === 'true' ? true : hasSummary === 'false' ? false : null,
+      hasDebrief: hasDebrief === 'true' ? true : hasDebrief === 'false' ? false : null,
+      search
+    };
+
+    const result = await databaseService.getAllTranscriptsForAdmin(options);
+
+    res.json({
+      success: true,
+      transcripts: result.transcripts,
+      pagination: {
+        limit: options.limit,
+        offset: options.offset,
+        total: result.total
+      }
+    });
+  })
+);
+
 module.exports = router; 

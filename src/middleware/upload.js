@@ -303,13 +303,13 @@ const uploadSegmentedDualAudio = () => {
       fileFilter: audioFileFilter,
       limits: {
         fileSize: parseFileSize(config.upload.maxFileSize),
-        files: 50 // Allow up to 50 files for segmented uploads (25 segments × 2 files each)
+        files: 200 // Allow up to 200 files for segmented uploads (100 segments × 2 files each)
       }
     });
 
     const uploadFields = segmentedUpload.fields([
-      { name: 'microphone', maxCount: 25 }, // Allow up to 25 microphone segments
-      { name: 'system', maxCount: 25 }      // Allow up to 25 system segments
+      { name: 'microphone', maxCount: 100 }, // Allow up to 100 microphone segments
+      { name: 'system', maxCount: 100 }      // Allow up to 100 system segments
     ]);
     
     uploadFields(req, res, (error) => {
