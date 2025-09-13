@@ -57,16 +57,7 @@ router.post('/summary/:transcriptId',
       hasContent: !!transcript?.content
     });
     
-    // Check if summary already exists
-    if (transcript.summary) {
-      return res.json({
-        success: true,
-        message: 'Summary already exists',
-        summary: transcript.summary,
-        cached: true
-      });
-    }
-
+    // Generate summary (allow regeneration)
     // Generate summary
     const result = await aiService.generateSummary(transcript.content);
     
@@ -92,7 +83,7 @@ router.post('/summary/:transcriptId',
       success: true,
       message: 'Summary generated successfully',
       summary: result.summary,
-      cached: false
+      regenerated: true
     });
   })
 );
@@ -172,16 +163,7 @@ router.post('/debrief/:transcriptId',
       hasContent: !!transcript?.content
     });
     
-    // Check if debrief already exists
-    if (transcript.debrief?.content) {
-      return res.json({
-        success: true,
-        message: 'Debrief already exists',
-        debrief: transcript.debrief,
-        cached: true
-      });
-    }
-
+    // Generate debrief (allow regeneration)
     // Generate debrief
     const result = await aiService.generateInterviewDebrief(
       transcript.content,
@@ -211,7 +193,7 @@ router.post('/debrief/:transcriptId',
       success: true,
       message: 'Debrief generated successfully',
       debrief: result.debrief,
-      cached: false
+      regenerated: true
     });
   })
 );
