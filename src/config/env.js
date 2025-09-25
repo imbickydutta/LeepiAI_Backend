@@ -57,6 +57,7 @@ const envSchema = Joi.object({
   APP_CURRENT_VERSION: Joi.string()
     .default('1.0.0'),
   APP_DOWNLOAD_URL: Joi.string()
+    .trim()
     .pattern(/^https?:\/\/.+/)
     .default('https://your-app-download-url.com'),
   
