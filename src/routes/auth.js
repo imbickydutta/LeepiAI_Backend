@@ -26,7 +26,11 @@ const validateRegister = [
   body('lastName')
     .trim()
     .isLength({ min: 1 })
-    .withMessage('Last name is required')
+    .withMessage('Last name is required'),
+  body('appVersion')
+    .optional()
+    .isString()
+    .withMessage('App version must be a string')
 ];
 
 /**
@@ -39,7 +43,11 @@ const validateLogin = [
     .withMessage('Please provide a valid email'),
   body('password')
     .notEmpty()
-    .withMessage('Password is required')
+    .withMessage('Password is required'),
+  body('appVersion')
+    .optional()
+    .isString()
+    .withMessage('App version must be a string')
 ];
 
 /**
@@ -69,7 +77,7 @@ router.post('/register',
   handleValidationErrors,
   requireDatabase,
   asyncHandler(async (req, res) => {
-    const { email, password, firstName, lastName } = req.body;
+    const { email, password, firstName, lastName, appVersion } = req.body;
     
     // Get device info from request
     const deviceInfo = {
@@ -83,6 +91,7 @@ router.post('/register',
       password,
       firstName,
       lastName,
+      appVersion,
       deviceInfo
     });
 
@@ -102,7 +111,10 @@ router.post('/register',
     } else {
       res.status(400).json({
         success: false,
-        error: result.error
+        error: result.error,
+        message: result.message || result.error,
+        ...(result.errorCode && { errorCode: result.errorCode }),
+        ...(result.downloadUrl && { downloadUrl: result.downloadUrl })
       });
     }
   })
@@ -117,7 +129,7 @@ router.post('/login',
   handleValidationErrors,
   requireDatabase,
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, appVersion } = req.body;
     
     // Get device info from request
     const deviceInfo = {
@@ -129,6 +141,7 @@ router.post('/login',
     const result = await authService.login({
       email,
       password,
+      appVersion,
       deviceInfo
     });
 
@@ -148,7 +161,10 @@ router.post('/login',
     } else {
       res.status(401).json({
         success: false,
-        error: result.error
+        error: result.error,
+        message: result.message || result.error,
+        ...(result.errorCode && { errorCode: result.errorCode }),
+        ...(result.downloadUrl && { downloadUrl: result.downloadUrl })
       });
     }
   })

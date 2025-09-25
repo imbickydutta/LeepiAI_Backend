@@ -53,6 +53,13 @@ const envSchema = Joi.object({
       otherwise: Joi.optional()
     }),
   
+  // App Version Control
+  APP_CURRENT_VERSION: Joi.string()
+    .default('1.0.0'),
+  APP_DOWNLOAD_URL: Joi.string()
+    .uri()
+    .default('https://your-app-download-url.com'),
+  
   // CORS (with secure defaults)
   CORS_ORIGIN: Joi.string()
     .default(process.env.NODE_ENV === 'production' 
@@ -147,5 +154,10 @@ module.exports = {
   rateLimit: {
     windowMs: envVars.RATE_LIMIT_WINDOW_MS,
     maxRequests: envVars.RATE_LIMIT_MAX_REQUESTS
+  },
+  
+  app: {
+    currentVersion: envVars.APP_CURRENT_VERSION,
+    downloadUrl: envVars.APP_DOWNLOAD_URL
   }
 }; 

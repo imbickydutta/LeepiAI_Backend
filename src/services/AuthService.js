@@ -22,7 +22,24 @@ class AuthService {
    */
   async register(userData) {
     try {
-      const { email, password, firstName, lastName } = userData;
+      const { email, password, firstName, lastName, appVersion } = userData;
+
+      // Check app version if provided
+      if (appVersion) {
+        const versionCheckResult = this._checkAppVersion(appVersion);
+        if (!versionCheckResult.isValid) {
+          return versionCheckResult;
+        }
+      } else {
+        // If no version provided, assume older version
+        return {
+          success: false,
+          error: 'Please Update the App',
+          message: `Please Update the App. Download the latest version from: ${config.app.downloadUrl}`,
+          errorCode: 'APP_UPDATE_REQUIRED',
+          downloadUrl: config.app.downloadUrl
+        };
+      }
 
       // Check if user already exists
       const existingUser = await User.findOne({ email });
@@ -72,7 +89,24 @@ class AuthService {
    */
   async login(credentials) {
     try {
-      const { email, password, deviceInfo } = credentials;
+      const { email, password, appVersion, deviceInfo } = credentials;
+
+      // Check app version if provided
+      if (appVersion) {
+        const versionCheckResult = this._checkAppVersion(appVersion);
+        if (!versionCheckResult.isValid) {
+          return versionCheckResult;
+        }
+      } else {
+        // If no version provided, assume older version
+        return {
+          success: false,
+          error: 'Please Update the App',
+          message: `Please Update the App. Download the latest version from: ${config.app.downloadUrl}`,
+          errorCode: 'APP_UPDATE_REQUIRED',
+          downloadUrl: config.app.downloadUrl
+        };
+      }
 
       // Find user
       const user = await User.findOne({ email, isActive: true });
@@ -421,6 +455,67 @@ class AuthService {
       case 'd': return value * 24 * 60 * 60 * 1000;
       default: return 7 * 24 * 60 * 60 * 1000; // Default to 7 days
     }
+  }
+
+  /**
+   * Check if app version is supported
+   * @param {string} clientVersion - Client app version
+   * @returns {Object} Version check result
+   */
+  _checkAppVersion(clientVersion) {
+    try {
+      const currentVersion = config.app.currentVersion;
+      
+      // Compare versions using semantic versioning
+      const isValidVersion = this._compareVersions(clientVersion, currentVersion);
+      
+      if (isValidVersion >= 0) {
+        return { isValid: true };
+      } else {
+        logger.warn('🔄 App version outdated:', {
+          clientVersion,
+          currentVersion,
+          downloadUrl: config.app.downloadUrl
+        });
+        
+        return {
+          success: false,
+          error: 'Please Update the App',
+          message: `Please Update the App. Your version: ${clientVersion}, Current version: ${currentVersion}. Download from: ${config.app.downloadUrl}`,
+          errorCode: 'APP_UPDATE_REQUIRED',
+          downloadUrl: config.app.downloadUrl,
+          currentVersion,
+          clientVersion
+        };
+      }
+    } catch (error) {
+      logger.error('❌ Version check failed:', error);
+      // If version check fails, allow login but log the error
+      return { isValid: true };
+    }
+  }
+
+  /**
+   * Compare two semantic versions
+   * @param {string} version1 - First version (e.g., "1.2.0")
+   * @param {string} version2 - Second version (e.g., "1.1.0")
+   * @returns {number} -1 if version1 < version2, 0 if equal, 1 if version1 > version2
+   */
+  _compareVersions(version1, version2) {
+    const v1Parts = version1.split('.').map(Number);
+    const v2Parts = version2.split('.').map(Number);
+    
+    // Pad arrays to same length
+    const maxLength = Math.max(v1Parts.length, v2Parts.length);
+    while (v1Parts.length < maxLength) v1Parts.push(0);
+    while (v2Parts.length < maxLength) v2Parts.push(0);
+    
+    for (let i = 0; i < maxLength; i++) {
+      if (v1Parts[i] < v2Parts[i]) return -1;
+      if (v1Parts[i] > v2Parts[i]) return 1;
+    }
+    
+    return 0; // Equal
   }
 }
 
