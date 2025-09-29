@@ -12,11 +12,11 @@ class AIService {
     if (this.apiKey) {
       try {
         this.genAI = new GoogleGenerativeAI(this.apiKey);
-        // Try Gemini 1.5 Flash-8B first (more reliable and free)
-        this.model = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
-        // Fallback to Gemini 1.0 Pro if needed
-        this.fallbackModel = this.genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
-        logger.info('🤖 AIService initialized with Gemini 1.5 Flash-8B and 1.0 Pro fallback');
+        // Try Gemini 2.5 Flash first (newest and most balanced)
+        this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        // Fallback to Gemini 1.5 Flash if needed
+        this.fallbackModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        logger.info('🤖 AIService initialized with Gemini 2.5 Flash and 1.5 Flash fallback');
       } catch (error) {
         logger.error('❌ Failed to initialize Gemini AI:', error);
       }
@@ -50,25 +50,25 @@ class AIService {
     let summary = null;
     let modelUsed = 'unknown';
 
-    // Try primary model first (Gemini 1.5 Flash-8B)
+    // Try primary model first (Gemini 2.5 Flash)
     try {
-      logger.info('🤖 Attempting summary generation with Gemini 1.5 Flash-8B...');
+      logger.info('🤖 Attempting summary generation with Gemini 2.5 Flash...');
       const result = await this.model.generateContent(prompt);
       const response = await result.response;
       summary = response.text();
-      modelUsed = 'gemini-1.5-flash-8b';
+      modelUsed = 'gemini-2.5-flash';
       
       logger.info('✅ Summary generated successfully with primary model');
     } catch (primaryError) {
       logger.warn('⚠️ Primary model failed for summary, trying fallback:', primaryError.message);
       
-      // Try fallback model (Gemini 1.0 Pro)
+      // Try fallback model (Gemini 1.5 Flash)
       try {
-        logger.info('🤖 Attempting summary generation with Gemini 1.0 Pro...');
+        logger.info('🤖 Attempting summary generation with Gemini 1.5 Flash...');
         const fallbackResult = await this.fallbackModel.generateContent(prompt);
         const fallbackResponse = await fallbackResult.response;
         summary = fallbackResponse.text();
-        modelUsed = 'gemini-1.0-pro';
+        modelUsed = 'gemini-1.5-flash';
         
         logger.info('✅ Summary generated successfully with fallback model');
       } catch (fallbackError) {
@@ -123,25 +123,25 @@ class AIService {
     let debriefContent = null;
     let modelUsed = 'unknown';
 
-    // Try primary model first (Gemini 1.5 Flash-8B)
+    // Try primary model first (Gemini 2.5 Flash)
     try {
-      logger.info('🤖 Attempting debrief generation with Gemini 1.5 Flash-8B...');
+      logger.info('🤖 Attempting debrief generation with Gemini 2.5 Flash...');
       const result = await this.model.generateContent(prompt);
       const response = await result.response;
       debriefContent = response.text();
-      modelUsed = 'gemini-1.5-flash-8b';
+      modelUsed = 'gemini-2.5-flash';
       
       logger.info('✅ Debrief generated successfully with primary model');
     } catch (primaryError) {
       logger.warn('⚠️ Primary model failed, trying fallback:', primaryError.message);
       
-      // Try fallback model (Gemini 1.0 Pro)
+      // Try fallback model (Gemini 1.5 Flash)
       try {
-        logger.info('🤖 Attempting debrief generation with Gemini 1.0 Pro...');
+        logger.info('🤖 Attempting debrief generation with Gemini 1.5 Flash...');
         const fallbackResult = await this.fallbackModel.generateContent(prompt);
         const fallbackResponse = await fallbackResult.response;
         debriefContent = fallbackResponse.text();
-        modelUsed = 'gemini-1.0-pro';
+        modelUsed = 'gemini-1.5-flash';
         
         logger.info('✅ Debrief generated successfully with fallback model');
       } catch (fallbackError) {
