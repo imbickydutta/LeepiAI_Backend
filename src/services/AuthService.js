@@ -24,7 +24,9 @@ class AuthService {
     try {
       const { email, password, firstName, lastName, appVersion } = userData;
 
-      // Check app version if provided
+      // Check app version for new user registration
+      // Note: All new registrations are regular users and require version check
+      // Admin accounts should be created through database/admin tools
       if (appVersion) {
         const versionCheckResult = this._checkAppVersion(appVersion);
         if (!versionCheckResult.isValid) {
@@ -32,6 +34,8 @@ class AuthService {
         }
       } else {
         // If no version provided, assume older version
+        logger.warn('⚠️ Registration attempt without app version', { email });
+        
         return {
           success: false,
           error: 'Please Update the App',
@@ -91,24 +95,7 @@ class AuthService {
     try {
       const { email, password, appVersion, deviceInfo } = credentials;
 
-      // Check app version if provided
-      if (appVersion) {
-        const versionCheckResult = this._checkAppVersion(appVersion);
-        if (!versionCheckResult.isValid) {
-          return versionCheckResult;
-        }
-      } else {
-        // If no version provided, assume older version
-        return {
-          success: false,
-          error: 'Please Update the App',
-          message: `Please Update the App. Download the latest version from: ${config.app.downloadUrl}`,
-          errorCode: 'APP_UPDATE_REQUIRED',
-          downloadUrl: config.app.downloadUrl
-        };
-      }
-
-      // Find user
+      // Find user first to check their role
       const user = await User.findOne({ email, isActive: true });
       if (!user) {
         return {
@@ -124,6 +111,36 @@ class AuthService {
           success: false,
           error: 'Invalid email or password'
         };
+      }
+
+      // Check app version (skip for admin users)
+      if (user.role !== 'admin') {
+        if (appVersion) {
+          const versionCheckResult = this._checkAppVersion(appVersion);
+          if (!versionCheckResult.isValid) {
+            return versionCheckResult;
+          }
+        } else {
+          // If no version provided, assume older version
+          logger.warn('⚠️ Login attempt without app version', { 
+            email, 
+            userId: user.id,
+            role: user.role 
+          });
+          
+          return {
+            success: false,
+            error: 'Please Update the App',
+            message: `Please Update the App. Download the latest version from: ${config.app.downloadUrl}`,
+            errorCode: 'APP_UPDATE_REQUIRED',
+            downloadUrl: config.app.downloadUrl
+          };
+        }
+      } else {
+        logger.info('✅ Admin login - skipping version check', { 
+          email, 
+          userId: user.id 
+        });
       }
 
       // Update last login
