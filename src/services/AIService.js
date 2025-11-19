@@ -12,11 +12,12 @@ class AIService {
     if (this.apiKey) {
       try {
         this.genAI = new GoogleGenerativeAI(this.apiKey);
-        // Try Gemini 2.5 Flash first (newest and most balanced)
+        // Primary: Gemini 2.5 Flash (newest and most balanced)
         this.model = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        // Fallback to Gemini 1.5 Flash if needed
-        this.fallbackModel = this.genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        logger.info('🤖 AIService initialized with Gemini 2.5 Flash and 1.5 Flash fallback');
+        // Fallback: Gemini 2.5 Flash Lite (lighter, faster)
+        this.fallbackModel = this.genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+        this.maxRetries = 3;
+        logger.info('🤖 AIService initialized with Gemini 2.5 Flash and 2.5 Flash Lite fallback (3 retries)');
       } catch (error) {
         logger.error('❌ Failed to initialize Gemini AI:', error);
       }
@@ -60,26 +61,44 @@ class AIService {
       
       logger.info('✅ Summary generated successfully with primary model');
     } catch (primaryError) {
-      logger.warn('⚠️ Primary model failed for summary, trying fallback:', primaryError.message);
+      logger.warn('⚠️ Primary model failed for summary, trying fallback with retries:', primaryError.message);
       
-      // Try fallback model (Gemini 1.5 Flash)
-      try {
-        logger.info('🤖 Attempting summary generation with Gemini 1.5 Flash...');
-        const fallbackResult = await this.fallbackModel.generateContent(prompt);
-        const fallbackResponse = await fallbackResult.response;
-        summary = fallbackResponse.text();
-        modelUsed = 'gemini-1.5-flash';
-        
-        logger.info('✅ Summary generated successfully with fallback model');
-      } catch (fallbackError) {
-        logger.error('❌ Both models failed to generate summary:', {
+      // Try fallback model (Gemini 2.5 Flash Lite) with retries
+      let lastFallbackError = null;
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        try {
+          logger.info(`🤖 Attempting summary generation with Gemini 2.5 Flash Lite (attempt ${attempt}/${this.maxRetries})...`);
+          const fallbackResult = await this.fallbackModel.generateContent(prompt);
+          const fallbackResponse = await fallbackResult.response;
+          summary = fallbackResponse.text();
+          modelUsed = 'gemini-2.5-flash-lite';
+          
+          logger.info(`✅ Summary generated successfully with fallback model on attempt ${attempt}`);
+          break; // Success, exit retry loop
+        } catch (fallbackError) {
+          lastFallbackError = fallbackError;
+          logger.warn(`⚠️ Fallback attempt ${attempt}/${this.maxRetries} failed:`, fallbackError.message);
+          
+          if (attempt < this.maxRetries) {
+            // Wait before retry (exponential backoff: 1s, 2s, 4s)
+            const waitTime = Math.pow(2, attempt - 1) * 1000;
+            logger.info(`⏳ Waiting ${waitTime}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+      }
+      
+      // If all retries failed
+      if (!summary && lastFallbackError) {
+        logger.error('❌ Both models failed to generate summary after all retries:', {
           primaryError: primaryError.message,
-          fallbackError: fallbackError.message
+          fallbackError: lastFallbackError.message,
+          retriesAttempted: this.maxRetries
         });
         
         return {
           success: false,
-          error: `AI generation failed. Primary: ${primaryError.message}. Fallback: ${fallbackError.message}`
+          error: `AI generation failed. Primary: ${primaryError.message}. Fallback (${this.maxRetries} retries): ${lastFallbackError.message}`
         };
       }
     }
@@ -133,26 +152,44 @@ class AIService {
       
       logger.info('✅ Debrief generated successfully with primary model');
     } catch (primaryError) {
-      logger.warn('⚠️ Primary model failed, trying fallback:', primaryError.message);
+      logger.warn('⚠️ Primary model failed, trying fallback with retries:', primaryError.message);
       
-      // Try fallback model (Gemini 1.5 Flash)
-      try {
-        logger.info('🤖 Attempting debrief generation with Gemini 1.5 Flash...');
-        const fallbackResult = await this.fallbackModel.generateContent(prompt);
-        const fallbackResponse = await fallbackResult.response;
-        debriefContent = fallbackResponse.text();
-        modelUsed = 'gemini-1.5-flash';
-        
-        logger.info('✅ Debrief generated successfully with fallback model');
-      } catch (fallbackError) {
-        logger.error('❌ Both models failed to generate debrief:', {
+      // Try fallback model (Gemini 2.5 Flash Lite) with retries
+      let lastFallbackError = null;
+      for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+        try {
+          logger.info(`🤖 Attempting debrief generation with Gemini 2.5 Flash Lite (attempt ${attempt}/${this.maxRetries})...`);
+          const fallbackResult = await this.fallbackModel.generateContent(prompt);
+          const fallbackResponse = await fallbackResult.response;
+          debriefContent = fallbackResponse.text();
+          modelUsed = 'gemini-2.5-flash-lite';
+          
+          logger.info(`✅ Debrief generated successfully with fallback model on attempt ${attempt}`);
+          break; // Success, exit retry loop
+        } catch (fallbackError) {
+          lastFallbackError = fallbackError;
+          logger.warn(`⚠️ Fallback attempt ${attempt}/${this.maxRetries} failed:`, fallbackError.message);
+          
+          if (attempt < this.maxRetries) {
+            // Wait before retry (exponential backoff: 1s, 2s, 4s)
+            const waitTime = Math.pow(2, attempt - 1) * 1000;
+            logger.info(`⏳ Waiting ${waitTime}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+          }
+        }
+      }
+      
+      // If all retries failed
+      if (!debriefContent && lastFallbackError) {
+        logger.error('❌ Both models failed to generate debrief after all retries:', {
           primaryError: primaryError.message,
-          fallbackError: fallbackError.message
+          fallbackError: lastFallbackError.message,
+          retriesAttempted: this.maxRetries
         });
         
         return {
           success: false,
-          error: `AI generation failed. Primary: ${primaryError.message}. Fallback: ${fallbackError.message}`
+          error: `AI generation failed. Primary: ${primaryError.message}. Fallback (${this.maxRetries} retries): ${lastFallbackError.message}`
         };
       }
     }
