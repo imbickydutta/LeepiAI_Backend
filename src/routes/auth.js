@@ -15,7 +15,8 @@ const router = express.Router();
 const validateRegister = [
   body('email')
     .isEmail()
-    .normalizeEmail()
+    .trim()
+    .toLowerCase()
     .withMessage('Please provide a valid email'),
   body('password')
     .isLength({ min: 6 })
@@ -40,7 +41,8 @@ const validateRegister = [
 const validateLogin = [
   body('email')
     .isEmail()
-    .normalizeEmail()
+    .trim()
+    .toLowerCase()
     .withMessage('Please provide a valid email'),
   body('password')
     .notEmpty()
