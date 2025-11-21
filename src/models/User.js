@@ -8,6 +8,14 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: uuidv4
   },
+  userName: {
+    type: String,
+    required: [true, 'Username is required'],
+    unique: true,
+    trim: true,
+    minlength: [3, 'Username must be at least 3 characters'],
+    maxlength: [30, 'Username cannot exceed 30 characters']
+  },
   email: {
     type: String,
     required: [true, 'Email is required'],
@@ -31,6 +39,11 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Last name is required'],
     trim: true,
     maxlength: [50, 'Last name cannot exceed 50 characters']
+  },
+  phoneNo: {
+    type: String,
+    trim: true,
+    match: [/^[0-9+\-\s()]*$/, 'Please enter a valid phone number']
   },
   isActive: {
     type: Boolean,
@@ -70,6 +83,7 @@ const indexes = [
   // Unique indexes
   { fields: { email: 1 }, options: { unique: true, name: 'email_unique' } },
   { fields: { id: 1 }, options: { unique: true, name: 'id_unique' } },
+  { fields: { userName: 1 }, options: { unique: true, name: 'userName_unique' } },
   
   // Performance indexes
   { fields: { createdAt: -1 }, options: { name: 'createdAt_desc' } },
@@ -102,7 +116,7 @@ userSchema.statics.ensureIndexes = async function() {
 
     // Check if we already have the required indexes
     const hasRequiredIndexes = existingIndexes.some(idx => 
-      idx.name === 'email_unique' || idx.name === 'id_unique'
+      idx.name === 'email_unique' || idx.name === 'id_unique' || idx.name === 'userName_unique'
     );
 
     if (hasRequiredIndexes) {
@@ -122,6 +136,10 @@ userSchema.statics.ensureIndexes = async function() {
     // Create id unique index
     await collection.createIndex({ id: 1 }, { unique: true, name: 'id_unique' });
     logger.info('✅ Created id_unique index');
+    
+    // Create userName unique index
+    await collection.createIndex({ userName: 1 }, { unique: true, name: 'userName_unique' });
+    logger.info('✅ Created userName_unique index');
     
     // Create other performance indexes
     await collection.createIndex({ createdAt: -1 }, { name: 'createdAt_desc' });
@@ -166,9 +184,11 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
 userSchema.methods.getPublicProfile = function() {
   return {
     id: this.id,
+    userName: this.userName,
     email: this.email,
     firstName: this.firstName,
     lastName: this.lastName,
+    phoneNo: this.phoneNo,
     role: this.role,
     isActive: this.isActive,
     preferences: this.preferences,

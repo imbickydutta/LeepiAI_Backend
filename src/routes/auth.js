@@ -70,53 +70,23 @@ const handleValidationErrors = (req, res, next) => {
 
 /**
  * POST /api/auth/register
- * Register a new user
+ * Register a new user (DISABLED)
+ * Registration is disabled. Users can only be created by administrators.
  */
 router.post('/register', 
-  validateRegister,
-  handleValidationErrors,
-  requireDatabase,
   asyncHandler(async (req, res) => {
-    const { email, password, firstName, lastName, appVersion } = req.body;
-    
-    // Get device info from request
-    const deviceInfo = {
-      userAgent: req.get('User-Agent'),
-      ip: req.ip,
-      platform: req.get('X-Platform') || 'web'
-    };
-
-    const result = await authService.register({
-      email,
-      password,
-      firstName,
-      lastName,
-      appVersion,
-      deviceInfo
+    // Registration is disabled - users must be created by admin
+    logger.warn('⚠️  Registration attempt blocked', { 
+      email: req.body?.email,
+      ip: req.ip 
     });
 
-    if (result.success) {
-      logger.info('👤 New user registered', { 
-        email,
-        userId: result.user.id 
-      });
-
-      res.status(201).json({
-        success: true,
-        message: 'User registered successfully',
-        user: result.user,
-        token: result.token,
-        refreshToken: result.refreshToken
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: result.error,
-        message: result.message || result.error,
-        ...(result.errorCode && { errorCode: result.errorCode }),
-        ...(result.downloadUrl && { downloadUrl: result.downloadUrl })
-      });
-    }
+    res.status(403).json({
+      success: false,
+      error: 'Registration Disabled',
+      message: 'To create a new account please reach out to our team.',
+      errorCode: 'REGISTRATION_DISABLED'
+    });
   })
 );
 

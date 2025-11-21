@@ -91,13 +91,15 @@ The LeepiAI Backend is a Node.js/Express REST API that provides secure backend s
 ### Authentication Endpoints
 
 ```
-POST   /api/auth/register     # Register new user
+POST   /api/auth/register     # ⚠️ DISABLED - Registration is closed
 POST   /api/auth/login        # User login
 POST   /api/auth/refresh      # Refresh access token
 POST   /api/auth/logout       # User logout
 GET    /api/auth/me           # Get current user
 POST   /api/auth/verify       # Verify token
 ```
+
+> **Note**: Public registration is disabled. New users can only be created by administrators using the bulk user creation script. See [scripts/README.md](scripts/README.md) for details.
 
 ### Audio Processing Endpoints
 
@@ -145,6 +147,40 @@ PUT    /api/users/preferences    # Update preferences
 POST   /api/users/change-password # Change password
 DELETE /api/users/account        # Delete account
 GET    /api/users/export         # Export user data
+```
+
+## 👥 User Management
+
+### Creating New Users
+
+Public registration is **disabled** for security. New users must be created by administrators using the bulk user creation script.
+
+**Bulk User Creation:**
+```bash
+# Create users from CSV file
+node scripts/bulk-create-users.js path/to/users.csv
+```
+
+**CSV Format:**
+```csv
+Username,Name,Phone No,Email,Password
+johndoe,John Doe,+1234567890,john@example.com,password123
+janedoe,Jane Doe,+0987654321,jane@example.com,securepass456
+```
+
+For detailed documentation, see [scripts/README.md](scripts/README.md)
+
+### User Login
+
+Existing users can login normally via the `/api/auth/login` endpoint:
+
+```bash
+curl -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "password123"
+  }'
 ```
 
 ## 🔧 Configuration
@@ -203,10 +239,13 @@ brew services start mongodb-community
 ```javascript
 {
   id: String (UUID),
+  userName: String (unique),
   email: String (unique),
   password: String (hashed),
   firstName: String,
   lastName: String,
+  phoneNo: String (optional),
+  role: String (user|admin),
   isActive: Boolean,
   preferences: {
     theme: String,

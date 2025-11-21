@@ -50,3 +50,6 @@ build/
 
 # Testing
 .nyc_output/ 
+
+# CSV files
+*.csv
