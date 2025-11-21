@@ -83,7 +83,7 @@ router.post('/register',
 
     res.status(403).json({
       success: false,
-      error: 'Registration Disabled',
+      error: 'Registration is disabled. To create a new account please reach out to our team.',
       message: 'To create a new account please reach out to our team.',
       errorCode: 'REGISTRATION_DISABLED'
     });
