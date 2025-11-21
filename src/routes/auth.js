@@ -83,8 +83,8 @@ router.post('/register',
 
     res.status(403).json({
       success: false,
-      error: 'Registration is disabled. To create a new account please reach out to our team.',
-      message: 'To create a new account please reach out to our team.',
+      error: 'Registration is currently disabled. Please login with the credentials shared by our team. If you have not received your credentials, please reach out to our team for access.',
+      message: 'Registration is currently disabled. Please login with the credentials shared by our team. If you have not received your credentials, please reach out to our team for access.',
       errorCode: 'REGISTRATION_DISABLED'
     });
   })
