@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const authService = require('../services/AuthService');
+const ActivityLogService = require('../services/ActivityLogService');
 const { authenticate } = require('../middleware/auth');
 const { requireDatabase } = require('../middleware/databaseCheck');
 const { asyncHandler } = require('../middleware/errorHandler');
@@ -121,6 +122,9 @@ router.post('/login',
         userId: result.user.id 
       });
 
+      // Log successful login
+      await ActivityLogService.logLogin(result.user, req, true);
+
       res.json({
         success: true,
         message: 'Login successful',
@@ -129,6 +133,14 @@ router.post('/login',
         refreshToken: result.refreshToken
       });
     } else {
+      // Log failed login attempt
+      await ActivityLogService.logLogin(
+        { id: 'unknown', email, userName: null, role: 'user' }, 
+        req, 
+        false, 
+        result.error || result.message
+      );
+
       res.status(401).json({
         success: false,
         error: result.error,
@@ -181,6 +193,9 @@ router.post('/logout',
 
     if (result.success) {
       logger.info('👋 User logged out', { userId: req.user.id });
+
+      // Log logout activity
+      await ActivityLogService.logLogout(req.user, req);
 
       res.json({
         success: true,

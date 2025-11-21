@@ -5,6 +5,7 @@ const { uploadSingleAudio, uploadMicSystemAudio, uploadSegmentedDualAudio, clean
 const { asyncHandler } = require('../middleware/errorHandler');
 const audioService = require('../services/AudioService');
 const databaseService = require('../services/DatabaseService');
+const ActivityLogService = require('../services/ActivityLogService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -222,6 +223,20 @@ router.post('/upload',
         segmentCount: validSegments.length
       });
 
+      // Log transcript generation activity
+      await ActivityLogService.logTranscriptGeneration({
+        user: req.user,
+        transcriptId: savedTranscript.id,
+        duration: transcriptionResult.duration || 0,
+        success: true,
+        metadata: {
+          transcriptLength: transcript.length,
+          segmentCount: validSegments.length,
+          audioFile: req.file.originalname
+        },
+        req
+      });
+
       res.json({
         success: true,
         message: 'Audio processed successfully',
@@ -413,6 +428,22 @@ router.post('/upload-dual',
         inputSegments: transcriptionResult.inputSegments.length,
         outputSegments: transcriptionResult.outputSegments.length,
         mergedSegments: transcriptionResult.mergedSegments.length
+      });
+
+      // Log transcript generation activity
+      await ActivityLogService.logTranscriptGeneration({
+        user: req.user,
+        transcriptId: savedTranscript.id,
+        duration: transcriptionResult.totalDuration || 0,
+        success: true,
+        metadata: {
+          transcriptLength: transcript.length,
+          segmentCount: transcriptionResult.mergedSegments.length,
+          audioFile: 'Dual Audio Recording',
+          inputSegments: transcriptionResult.inputSegments.length,
+          outputSegments: transcriptionResult.outputSegments.length
+        },
+        req
       });
 
       res.json({
@@ -859,6 +890,23 @@ router.post('/upload-segmented-dual',
         successfulChunks: successfulChunks,
         failedChunks: failedChunks,
         validSegments: validSegments.length
+      });
+
+      // Log transcript generation activity
+      await ActivityLogService.logTranscriptGeneration({
+        user: req.user,
+        transcriptId: savedTranscript.id,
+        duration: totalDuration || 0,
+        success: true,
+        metadata: {
+          transcriptLength: transcript.length,
+          segmentCount: validSegments.length,
+          audioFile: 'Segmented Dual Audio Recording',
+          totalChunks: microphone.length,
+          successfulChunks,
+          failedChunks
+        },
+        req
       });
 
       res.json({

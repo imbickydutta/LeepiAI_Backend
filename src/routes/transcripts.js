@@ -4,6 +4,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireDatabase } = require('../middleware/databaseCheck');
 const databaseService = require('../services/DatabaseService');
+const ActivityLogService = require('../services/ActivityLogService');
 const Transcript = require('../models/Transcript');
 const logger = require('../utils/logger');
 
@@ -115,6 +116,9 @@ router.get('/:id',
 
     const transcript = await databaseService.getTranscript(id, req.user.id);
 
+    // Log transcript view activity
+    await ActivityLogService.logTranscriptView(req.user, id, req);
+
     res.json({
       success: true,
       transcript
@@ -178,6 +182,9 @@ router.delete('/:id',
         transcriptId: id,
         userId: req.user.id
       });
+
+      // Log transcript deletion activity
+      await ActivityLogService.logTranscriptDeletion(req.user, id, req);
 
       return res.json({
         success: true,

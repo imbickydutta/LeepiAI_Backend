@@ -10,6 +10,7 @@ const aiRoutes = require('./ai');
 const userRoutes = require('./users');
 const analyticsRoutes = require('./analytics');
 const settingsRoutes = require('./settings');
+const activityLogRoutes = require('./activityLogs');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -20,5 +21,6 @@ router.use('/ai', aiRoutes);
 router.use('/users', userRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/activity-logs', activityLogRoutes);
 
 module.exports = router; 
