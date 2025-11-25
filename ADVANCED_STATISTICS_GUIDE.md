@@ -61,7 +61,35 @@ curl -X GET \
       "totalLoginAttempts": 1820,
       "totalSuccessfulLogins": 1765,
       "totalFailedLogins": 55,
-      "successRate": "97.02%"
+      "successRate": "97.02%",
+      "users": {
+        "allLoginUsers": [
+          {
+            "userId": "user-123",
+            "userEmail": "john@example.com",
+            "userName": "john_doe",
+            "loginAttempts": 15,
+            "successfulLogins": 14,
+            "failedLogins": 1
+          }
+        ],
+        "successfulLoginUsers": [
+          {
+            "userId": "user-123",
+            "userEmail": "john@example.com",
+            "userName": "john_doe",
+            "successfulLogins": 14
+          }
+        ],
+        "failedOnlyUsers": [
+          {
+            "userId": "user-456",
+            "userEmail": "failed@example.com",
+            "userName": "failed_user",
+            "failedAttempts": 3
+          }
+        ]
+      }
     },
     "transcriptMetrics": {
       "uniqueUsersGeneratedTranscripts": 180,
@@ -70,7 +98,15 @@ curl -X GET \
       "actualTranscripts": 398,
       "transcriptsWithoutDuration": 21,
       "trialPercentage": "22.69%",
-      "actualPercentage": "73.43%"
+      "actualPercentage": "73.43%",
+      "users": [
+        {
+          "userId": "user-123",
+          "userEmail": "john@example.com",
+          "userName": "john_doe",
+          "transcriptCount": 5
+        }
+      ]
     }
   },
   "filters": {

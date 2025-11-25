@@ -303,7 +303,49 @@ const stats = await fetchAdvancedStatistics({ startDate, endDate });
       "totalLoginAttempts": 1820,
       "totalSuccessfulLogins": 1765,
       "totalFailedLogins": 55,
-      "successRate": "97.02%"
+      "successRate": "97.02%",
+      "users": {
+        "allLoginUsers": [
+          {
+            "userId": "user-id-1",
+            "userEmail": "john.doe@example.com",
+            "userName": "john_doe",
+            "loginAttempts": 15,
+            "successfulLogins": 14,
+            "failedLogins": 1
+          },
+          {
+            "userId": "user-id-2",
+            "userEmail": "jane.smith@example.com",
+            "userName": "jane_smith",
+            "loginAttempts": 8,
+            "successfulLogins": 8,
+            "failedLogins": 0
+          }
+        ],
+        "successfulLoginUsers": [
+          {
+            "userId": "user-id-1",
+            "userEmail": "john.doe@example.com",
+            "userName": "john_doe",
+            "successfulLogins": 14
+          },
+          {
+            "userId": "user-id-2",
+            "userEmail": "jane.smith@example.com",
+            "userName": "jane_smith",
+            "successfulLogins": 8
+          }
+        ],
+        "failedOnlyUsers": [
+          {
+            "userId": "user-id-3",
+            "userEmail": "failed.user@example.com",
+            "userName": "failed_user",
+            "failedAttempts": 3
+          }
+        ]
+      }
     },
     "transcriptMetrics": {
       "uniqueUsersGeneratedTranscripts": 180,
@@ -312,7 +354,21 @@ const stats = await fetchAdvancedStatistics({ startDate, endDate });
       "actualTranscripts": 398,
       "transcriptsWithoutDuration": 21,
       "trialPercentage": "22.69%",
-      "actualPercentage": "73.43%"
+      "actualPercentage": "73.43%",
+      "users": [
+        {
+          "userId": "user-id-1",
+          "userEmail": "john.doe@example.com",
+          "userName": "john_doe",
+          "transcriptCount": 5
+        },
+        {
+          "userId": "user-id-2",
+          "userEmail": "jane.smith@example.com",
+          "userName": "jane_smith",
+          "transcriptCount": 3
+        }
+      ]
     }
   },
   "filters": {
@@ -341,6 +397,25 @@ const stats = await fetchAdvancedStatistics({ startDate, endDate });
 - `transcriptsWithoutDuration`: Number of transcripts where duration information is not available
 - `trialPercentage`: Percentage of trial transcripts
 - `actualPercentage`: Percentage of actual transcripts
+- `users`: Array of users who generated transcripts, including userId, email, userName, and transcript count (sorted by count, descending)
+
+**User Arrays:**
+
+The response includes detailed user information for tracking and analysis:
+
+**Login Users:**
+- `allLoginUsers`: All users who attempted login, with their attempt counts
+- `successfulLoginUsers`: Users who successfully logged in at least once
+- `failedOnlyUsers`: Users who never successfully logged in (potential issues)
+
+**Transcript Users:**
+- `users`: Users who generated transcripts, sorted by transcript count (most active first)
+
+Each user object includes:
+- `userId`: Unique user identifier
+- `userEmail`: User's email address
+- `userName`: User's username
+- Additional metrics specific to the category (login attempts, transcript counts, etc.)
 
 ---
 
@@ -1567,6 +1642,36 @@ interface UserActivityResponse {
   };
 }
 
+interface LoginUser {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  loginAttempts: number;
+  successfulLogins: number;
+  failedLogins: number;
+}
+
+interface SuccessfulLoginUser {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  successfulLogins: number;
+}
+
+interface FailedOnlyUser {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  failedAttempts: number;
+}
+
+interface TranscriptUser {
+  userId: string;
+  userEmail: string;
+  userName: string;
+  transcriptCount: number;
+}
+
 interface AdvancedStatisticsResponse {
   success: boolean;
   data: {
@@ -1582,6 +1687,11 @@ interface AdvancedStatisticsResponse {
       totalSuccessfulLogins: number;
       totalFailedLogins: number;
       successRate: string;
+      users: {
+        allLoginUsers: LoginUser[];
+        successfulLoginUsers: SuccessfulLoginUser[];
+        failedOnlyUsers: FailedOnlyUser[];
+      };
     };
     transcriptMetrics: {
       uniqueUsersGeneratedTranscripts: number;
@@ -1591,6 +1701,7 @@ interface AdvancedStatisticsResponse {
       transcriptsWithoutDuration: number;
       trialPercentage: string;
       actualPercentage: string;
+      users: TranscriptUser[];
     };
   };
   filters: {

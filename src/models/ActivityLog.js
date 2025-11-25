@@ -296,17 +296,19 @@ activityLogSchema.statics.getAdvancedStatistics = async function({
     }
   }
   
-  // 1. Login Statistics
+  // 1. Login Statistics with User Details
   const loginQuery = {
     ...query,
     actionType: { $in: ['LOGIN', 'LOGIN_FAILED'] }
   };
   
-  const loginStats = await this.aggregate([
+  const loginUserDetails = await this.aggregate([
     { $match: loginQuery },
     {
       $group: {
         _id: '$userId',
+        userEmail: { $first: '$userEmail' },
+        userName: { $first: '$userName' },
         loginAttempts: { $sum: 1 },
         successfulLogins: {
           $sum: { 
@@ -332,27 +334,75 @@ activityLogSchema.statics.getAdvancedStatistics = async function({
       }
     },
     {
-      $group: {
-        _id: null,
-        totalUsersTriedLogin: { $sum: 1 },
-        usersWithSuccessfulLogin: {
-          $sum: { $cond: [{ $gt: ['$successfulLogins', 0] }, 1, 0] }
-        },
-        usersWithOnlyFailedLogins: {
-          $sum: { $cond: [{ $eq: ['$successfulLogins', 0] }, 1, 0] }
-        },
-        totalLoginAttempts: { $sum: '$loginAttempts' },
-        totalSuccessfulLogins: { $sum: '$successfulLogins' },
-        totalFailedLogins: { $sum: '$failedLogins' }
-      }
+      $sort: { loginAttempts: -1 }
     }
   ]);
   
-  // 2. Transcript Statistics
+  // Separate users into categories
+  const allLoginUsers = loginUserDetails.map(u => ({
+    userId: u._id,
+    userEmail: u.userEmail,
+    userName: u.userName,
+    loginAttempts: u.loginAttempts,
+    successfulLogins: u.successfulLogins,
+    failedLogins: u.failedLogins
+  }));
+  
+  const successfulLoginUsers = loginUserDetails
+    .filter(u => u.successfulLogins > 0)
+    .map(u => ({
+      userId: u._id,
+      userEmail: u.userEmail,
+      userName: u.userName,
+      successfulLogins: u.successfulLogins
+    }));
+  
+  const failedOnlyUsers = loginUserDetails
+    .filter(u => u.successfulLogins === 0)
+    .map(u => ({
+      userId: u._id,
+      userEmail: u.userEmail,
+      userName: u.userName,
+      failedAttempts: u.failedLogins
+    }));
+  
+  // Calculate totals
+  const loginStats = [{
+    totalUsersTriedLogin: allLoginUsers.length,
+    usersWithSuccessfulLogin: successfulLoginUsers.length,
+    usersWithOnlyFailedLogins: failedOnlyUsers.length,
+    totalLoginAttempts: allLoginUsers.reduce((sum, u) => sum + u.loginAttempts, 0),
+    totalSuccessfulLogins: allLoginUsers.reduce((sum, u) => sum + u.successfulLogins, 0),
+    totalFailedLogins: allLoginUsers.reduce((sum, u) => sum + u.failedLogins, 0)
+  }];
+  
+  // 2. Transcript Statistics with User Details
   const transcriptQuery = {
     ...query,
     actionType: 'TRANSCRIPT_GENERATED'
   };
+  
+  const transcriptUserDetails = await this.aggregate([
+    { $match: { ...transcriptQuery, success: true } },
+    {
+      $group: {
+        _id: '$userId',
+        userEmail: { $first: '$userEmail' },
+        userName: { $first: '$userName' },
+        transcriptCount: { $sum: 1 }
+      }
+    },
+    {
+      $sort: { transcriptCount: -1 }
+    }
+  ]);
+  
+  const transcriptGeneratingUsers = transcriptUserDetails.map(u => ({
+    userId: u._id,
+    userEmail: u.userEmail,
+    userName: u.userName,
+    transcriptCount: u.transcriptCount
+  }));
   
   const transcriptStats = await this.aggregate([
     { $match: transcriptQuery },
@@ -465,7 +515,12 @@ activityLogSchema.statics.getAdvancedStatistics = async function({
       totalFailedLogins: loginData.totalFailedLogins,
       successRate: loginData.totalLoginAttempts > 0 
         ? ((loginData.totalSuccessfulLogins / loginData.totalLoginAttempts) * 100).toFixed(2) + '%'
-        : '0%'
+        : '0%',
+      users: {
+        allLoginUsers: allLoginUsers,
+        successfulLoginUsers: successfulLoginUsers,
+        failedOnlyUsers: failedOnlyUsers
+      }
     },
     transcriptMetrics: {
       uniqueUsersGeneratedTranscripts: transcriptUserData.uniqueUsersGeneratedTranscripts,
@@ -478,7 +533,8 @@ activityLogSchema.statics.getAdvancedStatistics = async function({
         : '0%',
       actualPercentage: transcriptCountData.totalTranscripts > 0
         ? ((transcriptCountData.actualTranscripts / transcriptCountData.totalTranscripts) * 100).toFixed(2) + '%'
-        : '0%'
+        : '0%',
+      users: transcriptGeneratingUsers
     }
   };
 };

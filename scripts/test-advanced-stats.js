@@ -54,6 +54,18 @@ async function testAdvancedStatistics() {
     console.log(`  📈 Success Rate:                      ${stats.loginMetrics.successRate}`);
     console.log('');
     
+    // Display user details for failed only users
+    if (stats.loginMetrics.users.failedOnlyUsers.length > 0) {
+      console.log('  ⚠️  Users Who Failed All Login Attempts:');
+      stats.loginMetrics.users.failedOnlyUsers.slice(0, 5).forEach(user => {
+        console.log(`     • ${user.userEmail} (${user.userName || 'N/A'}) - ${user.failedAttempts} failed attempts`);
+      });
+      if (stats.loginMetrics.users.failedOnlyUsers.length > 5) {
+        console.log(`     ... and ${stats.loginMetrics.users.failedOnlyUsers.length - 5} more`);
+      }
+      console.log('');
+    }
+    
     console.log('═══════════════════════════════════════════════════════');
     console.log('📝 TRANSCRIPT METRICS');
     console.log('═══════════════════════════════════════════════════════');
@@ -62,6 +74,19 @@ async function testAdvancedStatistics() {
     console.log(`  ⏱️  Trial Transcripts (< 5 min):       ${stats.transcriptMetrics.trialTranscripts} (${stats.transcriptMetrics.trialPercentage})`);
     console.log(`  ⏰ Actual Transcripts (≥ 5 min):      ${stats.transcriptMetrics.actualTranscripts} (${stats.transcriptMetrics.actualPercentage})`);
     console.log(`  ℹ️  Without Duration Info:             ${stats.transcriptMetrics.transcriptsWithoutDuration}`);
+    console.log('');
+    
+    // Display top transcript generating users
+    if (stats.transcriptMetrics.users.length > 0) {
+      console.log('  🌟 Top Transcript Generating Users:');
+      stats.transcriptMetrics.users.slice(0, 5).forEach((user, index) => {
+        console.log(`     ${index + 1}. ${user.userEmail} (${user.userName || 'N/A'}) - ${user.transcriptCount} transcripts`);
+      });
+      if (stats.transcriptMetrics.users.length > 5) {
+        console.log(`     ... and ${stats.transcriptMetrics.users.length - 5} more users`);
+      }
+      console.log('');
+    }
     console.log('═══════════════════════════════════════════════════════');
     console.log('');
 

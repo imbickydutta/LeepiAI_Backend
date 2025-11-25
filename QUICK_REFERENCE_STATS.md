@@ -34,7 +34,35 @@ GET /api/activity-logs/advanced-statistics
       "totalLoginAttempts": 1820,
       "totalSuccessfulLogins": 1765,
       "totalFailedLogins": 55,
-      "successRate": "97.02%"
+      "successRate": "97.02%",
+      "users": {
+        "allLoginUsers": [
+          {
+            "userId": "user-id-1",
+            "userEmail": "user1@example.com",
+            "userName": "user1",
+            "loginAttempts": 15,
+            "successfulLogins": 14,
+            "failedLogins": 1
+          }
+        ],
+        "successfulLoginUsers": [
+          {
+            "userId": "user-id-1",
+            "userEmail": "user1@example.com",
+            "userName": "user1",
+            "successfulLogins": 14
+          }
+        ],
+        "failedOnlyUsers": [
+          {
+            "userId": "user-id-2",
+            "userEmail": "user2@example.com",
+            "userName": "user2",
+            "failedAttempts": 3
+          }
+        ]
+      }
     },
     "transcriptMetrics": {
       "uniqueUsersGeneratedTranscripts": 180,
@@ -43,7 +71,15 @@ GET /api/activity-logs/advanced-statistics
       "actualTranscripts": 398,
       "transcriptsWithoutDuration": 21,
       "trialPercentage": "22.69%",
-      "actualPercentage": "73.43%"
+      "actualPercentage": "73.43%",
+      "users": [
+        {
+          "userId": "user-id-1",
+          "userEmail": "user1@example.com",
+          "userName": "user1",
+          "transcriptCount": 5
+        }
+      ]
     }
   },
   "filters": {
