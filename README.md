@@ -13,7 +13,8 @@ The LeepiAI Backend is a Node.js/Express REST API that provides secure backend s
 - **🤖 AI Analysis**: Google Gemini integration for summaries, debriefs, and chat
 - **💾 Data Management**: MongoDB for scalable data storage
 - **🛡️ Security**: Rate limiting, CORS, input validation, and error handling
-- **📊 Analytics**: User statistics and transcript management
+- **📊 Advanced Analytics**: User activity tracking, login metrics, transcript statistics
+- **📈 Activity Logging**: Comprehensive audit trail for all user actions
 - **📤 Export**: Multiple format support (TXT, JSON, Markdown)
 
 ## 🏗️ Architecture
@@ -148,6 +149,25 @@ POST   /api/users/change-password # Change password
 DELETE /api/users/account        # Delete account
 GET    /api/users/export         # Export user data
 ```
+
+### Activity Logs & Statistics Endpoints (Admin Only)
+
+```
+GET    /api/activity-logs                    # Get activity logs with filters
+GET    /api/activity-logs/statistics         # Get basic statistics
+GET    /api/activity-logs/advanced-statistics # Get advanced user metrics
+GET    /api/activity-logs/user/:userId       # Get user activity summary
+GET    /api/activity-logs/action-types       # Get available action types
+GET    /api/activity-logs/my-activity        # Get own activity (non-admin)
+```
+
+**Advanced Statistics Metrics:**
+- 🔐 **Login Analytics**: Unique users, success rates, failure tracking
+- 📝 **Transcript Analytics**: User engagement, trial vs actual usage
+- 📊 **Date Range Filtering**: Flexible reporting periods
+- 💡 **Insights**: Conversion rates, adoption metrics
+
+See [ADVANCED_STATISTICS_GUIDE.md](ADVANCED_STATISTICS_GUIDE.md) and [FRONTEND_ACTIVITY_LOGS_API.md](FRONTEND_ACTIVITY_LOGS_API.md) for complete documentation.
 
 ## 👥 User Management
 

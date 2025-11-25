@@ -77,3 +77,104 @@ node scripts/bulk-create-users.js scripts/sample-users.csv
 - Phone numbers are optional and can be left empty
 - Names with spaces are automatically split into firstName and lastName
 
+### 4. Test Advanced Statistics (`test-advanced-stats.js`)
+
+Tests the advanced statistics API endpoint and displays comprehensive metrics about user activities.
+
+#### Usage
+
+```bash
+# Test with last 30 days (default)
+node scripts/test-advanced-stats.js
+
+# Test with specific date range
+node scripts/test-advanced-stats.js <start-date> <end-date>
+```
+
+#### Examples
+
+```bash
+# Last 30 days
+node scripts/test-advanced-stats.js
+
+# Specific month (January 2025)
+node scripts/test-advanced-stats.js 2025-01-01 2025-01-31
+
+# Entire year (2025)
+node scripts/test-advanced-stats.js 2025-01-01 2025-12-31
+```
+
+#### What It Tests
+
+The script verifies and displays:
+
+**Login Metrics:**
+- Unique users who tried to login
+- Unique users who successfully logged in
+- Unique users who failed all login attempts
+- Total login attempts (all users)
+- Success/failure counts and rates
+
+**Transcript Metrics:**
+- Unique users who generated transcripts
+- Total transcripts generated
+- Trial transcripts (< 5 minutes duration)
+- Actual transcripts (≥ 5 minutes duration)
+- Transcripts without duration information
+- Percentage breakdown
+
+**Additional Insights:**
+- User conversion rates
+- Average transcripts per user
+- Engagement indicators
+
+#### Sample Output
+
+```
+🔌 Connecting to MongoDB...
+✅ Connected to MongoDB
+
+📊 Fetching Advanced Statistics...
+Date Range: 2025-01-01T00:00:00.000Z to 2025-01-31T23:59:59.999Z
+
+📈 RESULTS:
+
+═══════════════════════════════════════════════════════
+🔐 LOGIN METRICS
+═══════════════════════════════════════════════════════
+  👥 Unique Users Tried Login:          245
+  ✅ Unique Users Successful Login:     230
+  ❌ Unique Users Failed Only:          15
+  📊 Total Login Attempts:              1820
+  ✔️  Total Successful Logins:           1765
+  ✖️  Total Failed Logins:               55
+  📈 Success Rate:                      97.02%
+
+═══════════════════════════════════════════════════════
+📝 TRANSCRIPT METRICS
+═══════════════════════════════════════════════════════
+  👤 Unique Users Generated Transcripts: 180
+  📄 Total Transcripts:                  542
+  ⏱️  Trial Transcripts (< 5 min):       123 (22.69%)
+  ⏰ Actual Transcripts (≥ 5 min):      398 (73.43%)
+  ℹ️  Without Duration Info:             21
+═══════════════════════════════════════════════════════
+
+💡 INSIGHTS:
+  • 93.88% of users who tried to login succeeded at least once
+  • 6.12% of users never successfully logged in (potential issues)
+  • Average transcripts per user: 3.01
+  • Users are creating more actual interviews than trials (good engagement!)
+
+✅ Test completed successfully!
+
+🔌 Database connection closed
+```
+
+#### Use Cases
+
+1. **Verify Implementation:** Test that the advanced statistics endpoint works correctly
+2. **Monitor System Health:** Check login success rates and user engagement
+3. **Generate Reports:** Get quick statistics for specific date ranges
+4. **Debug Issues:** Investigate authentication or transcript generation problems
+

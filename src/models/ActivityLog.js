@@ -279,6 +279,210 @@ activityLogSchema.statics.getStatistics = async function({
   };
 };
 
+// Static method to get advanced statistics with user metrics
+activityLogSchema.statics.getAdvancedStatistics = async function({
+  startDate = null,
+  endDate = null
+}) {
+  const query = {};
+  
+  if (startDate || endDate) {
+    query.createdAt = {};
+    if (startDate) {
+      query.createdAt.$gte = new Date(startDate);
+    }
+    if (endDate) {
+      query.createdAt.$lte = new Date(endDate);
+    }
+  }
+  
+  // 1. Login Statistics
+  const loginQuery = {
+    ...query,
+    actionType: { $in: ['LOGIN', 'LOGIN_FAILED'] }
+  };
+  
+  const loginStats = await this.aggregate([
+    { $match: loginQuery },
+    {
+      $group: {
+        _id: '$userId',
+        loginAttempts: { $sum: 1 },
+        successfulLogins: {
+          $sum: { 
+            $cond: [
+              { $and: [{ $eq: ['$actionType', 'LOGIN'] }, '$success'] },
+              1,
+              0
+            ]
+          }
+        },
+        failedLogins: {
+          $sum: {
+            $cond: [
+              { $or: [
+                { $eq: ['$actionType', 'LOGIN_FAILED'] },
+                { $and: [{ $eq: ['$actionType', 'LOGIN'] }, { $eq: ['$success', false] }] }
+              ]},
+              1,
+              0
+            ]
+          }
+        }
+      }
+    },
+    {
+      $group: {
+        _id: null,
+        totalUsersTriedLogin: { $sum: 1 },
+        usersWithSuccessfulLogin: {
+          $sum: { $cond: [{ $gt: ['$successfulLogins', 0] }, 1, 0] }
+        },
+        usersWithOnlyFailedLogins: {
+          $sum: { $cond: [{ $eq: ['$successfulLogins', 0] }, 1, 0] }
+        },
+        totalLoginAttempts: { $sum: '$loginAttempts' },
+        totalSuccessfulLogins: { $sum: '$successfulLogins' },
+        totalFailedLogins: { $sum: '$failedLogins' }
+      }
+    }
+  ]);
+  
+  // 2. Transcript Statistics
+  const transcriptQuery = {
+    ...query,
+    actionType: 'TRANSCRIPT_GENERATED'
+  };
+  
+  const transcriptStats = await this.aggregate([
+    { $match: transcriptQuery },
+    {
+      $facet: {
+        userStats: [
+          {
+            $group: {
+              _id: '$userId',
+              transcriptCount: { $sum: 1 },
+              successfulTranscripts: {
+                $sum: { $cond: ['$success', 1, 0] }
+              }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              uniqueUsersGeneratedTranscripts: {
+                $sum: { $cond: [{ $gt: ['$successfulTranscripts', 0] }, 1, 0] }
+              },
+              totalUniqueUsers: { $sum: 1 }
+            }
+          }
+        ],
+        transcriptCounts: [
+          {
+            $match: { success: true }
+          },
+          {
+            $group: {
+              _id: null,
+              totalTranscripts: { $sum: 1 },
+              trialTranscripts: {
+                $sum: {
+                  $cond: [
+                    { $and: [
+                      { $ne: ['$duration', null] },
+                      { $lt: ['$duration', 300000] }
+                    ]},
+                    1,
+                    0
+                  ]
+                }
+              },
+              actualTranscripts: {
+                $sum: {
+                  $cond: [
+                    { $and: [
+                      { $ne: ['$duration', null] },
+                      { $gte: ['$duration', 300000] }
+                    ]},
+                    1,
+                    0
+                  ]
+                }
+              },
+              transcriptsWithoutDuration: {
+                $sum: {
+                  $cond: [
+                    { $or: [
+                      { $eq: ['$duration', null] },
+                      { $eq: [{ $ifNull: ['$duration', null] }, null] }
+                    ]},
+                    1,
+                    0
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]);
+  
+  // Extract and format results
+  const loginData = loginStats[0] || {
+    totalUsersTriedLogin: 0,
+    usersWithSuccessfulLogin: 0,
+    usersWithOnlyFailedLogins: 0,
+    totalLoginAttempts: 0,
+    totalSuccessfulLogins: 0,
+    totalFailedLogins: 0
+  };
+  
+  const transcriptData = transcriptStats[0] || { userStats: [], transcriptCounts: [] };
+  const transcriptUserData = transcriptData.userStats[0] || {
+    uniqueUsersGeneratedTranscripts: 0,
+    totalUniqueUsers: 0
+  };
+  const transcriptCountData = transcriptData.transcriptCounts[0] || {
+    totalTranscripts: 0,
+    trialTranscripts: 0,
+    actualTranscripts: 0,
+    transcriptsWithoutDuration: 0
+  };
+  
+  return {
+    dateRange: {
+      startDate: startDate ? new Date(startDate).toISOString() : null,
+      endDate: endDate ? new Date(endDate).toISOString() : null
+    },
+    loginMetrics: {
+      uniqueUsersTriedLogin: loginData.totalUsersTriedLogin,
+      uniqueUsersSuccessfulLogin: loginData.usersWithSuccessfulLogin,
+      uniqueUsersFailedOnly: loginData.usersWithOnlyFailedLogins,
+      totalLoginAttempts: loginData.totalLoginAttempts,
+      totalSuccessfulLogins: loginData.totalSuccessfulLogins,
+      totalFailedLogins: loginData.totalFailedLogins,
+      successRate: loginData.totalLoginAttempts > 0 
+        ? ((loginData.totalSuccessfulLogins / loginData.totalLoginAttempts) * 100).toFixed(2) + '%'
+        : '0%'
+    },
+    transcriptMetrics: {
+      uniqueUsersGeneratedTranscripts: transcriptUserData.uniqueUsersGeneratedTranscripts,
+      totalTranscripts: transcriptCountData.totalTranscripts,
+      trialTranscripts: transcriptCountData.trialTranscripts,
+      actualTranscripts: transcriptCountData.actualTranscripts,
+      transcriptsWithoutDuration: transcriptCountData.transcriptsWithoutDuration,
+      trialPercentage: transcriptCountData.totalTranscripts > 0
+        ? ((transcriptCountData.trialTranscripts / transcriptCountData.totalTranscripts) * 100).toFixed(2) + '%'
+        : '0%',
+      actualPercentage: transcriptCountData.totalTranscripts > 0
+        ? ((transcriptCountData.actualTranscripts / transcriptCountData.totalTranscripts) * 100).toFixed(2) + '%'
+        : '0%'
+    }
+  };
+};
+
 const ActivityLog = mongoose.model('ActivityLog', activityLogSchema);
 
 module.exports = ActivityLog;

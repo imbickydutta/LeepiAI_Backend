@@ -130,6 +130,51 @@ router.get('/statistics',
 );
 
 /**
+ * GET /api/activity-logs/advanced-statistics
+ * Get advanced statistics with user metrics (Admin only)
+ * 
+ * Query params:
+ * - startDate: Start date for date range (ISO 8601 format)
+ * - endDate: End date for date range (ISO 8601 format)
+ * 
+ * Returns:
+ * - Login metrics: unique users, success/failure counts
+ * - Transcript metrics: users who generated transcripts, trial vs actual transcripts
+ */
+router.get('/advanced-statistics',
+  authenticate,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { startDate, endDate } = req.query;
+    
+    const filters = {};
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    
+    logger.info('Admin fetching advanced statistics', {
+      adminId: req.user.id,
+      filters
+    });
+    
+    const result = await ActivityLogService.getAdvancedStatistics(filters);
+    
+    if (!result.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to fetch advanced statistics',
+        message: result.error
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: result.data,
+      filters
+    });
+  })
+);
+
+/**
  * GET /api/activity-logs/user/:userId
  * Get activity logs for a specific user (Admin only)
  */

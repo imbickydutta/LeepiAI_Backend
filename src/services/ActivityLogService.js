@@ -286,6 +286,25 @@ class ActivityLogService {
   }
   
   /**
+   * Get advanced statistics with user metrics (Admin only)
+   */
+  static async getAdvancedStatistics(filters) {
+    try {
+      const stats = await ActivityLog.getAdvancedStatistics(filters);
+      return {
+        success: true,
+        data: stats
+      };
+    } catch (error) {
+      logger.error('Error fetching advanced statistics:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+  
+  /**
    * Get user activity summary
    */
   static async getUserActivitySummary(userId, days = 30) {

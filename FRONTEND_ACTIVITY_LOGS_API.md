@@ -246,7 +246,105 @@ const stats = await fetchStatistics({
 
 ---
 
-### 3. Get User Activity Summary (Admin Only)
+### 3. Get Advanced Statistics (Admin Only)
+
+**Endpoint:** `GET /api/activity-logs/advanced-statistics`
+
+**Description:** Get comprehensive user metrics and statistics with date range filtering. This provides detailed insights about:
+- Login metrics (unique users, success/failure rates)
+- Transcript generation metrics (users, trial vs actual transcripts)
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `startDate` | string | No | Start date (ISO 8601) |
+| `endDate` | string | No | End date (ISO 8601) |
+
+**Request Example:**
+
+```javascript
+const fetchAdvancedStatistics = async (filters = {}) => {
+  const params = new URLSearchParams();
+  
+  if (filters.startDate) params.append('startDate', filters.startDate);
+  if (filters.endDate) params.append('endDate', filters.endDate);
+  
+  const response = await fetch(`/api/activity-logs/advanced-statistics?${params}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  
+  return await response.json();
+};
+
+// Usage - Get stats for the last 30 days
+const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+const endDate = new Date().toISOString();
+const stats = await fetchAdvancedStatistics({ startDate, endDate });
+```
+
+**Response Example:**
+
+```json
+{
+  "success": true,
+  "data": {
+    "dateRange": {
+      "startDate": "2025-01-01T00:00:00.000Z",
+      "endDate": "2025-11-25T23:59:59.999Z"
+    },
+    "loginMetrics": {
+      "uniqueUsersTriedLogin": 245,
+      "uniqueUsersSuccessfulLogin": 230,
+      "uniqueUsersFailedOnly": 15,
+      "totalLoginAttempts": 1820,
+      "totalSuccessfulLogins": 1765,
+      "totalFailedLogins": 55,
+      "successRate": "97.02%"
+    },
+    "transcriptMetrics": {
+      "uniqueUsersGeneratedTranscripts": 180,
+      "totalTranscripts": 542,
+      "trialTranscripts": 123,
+      "actualTranscripts": 398,
+      "transcriptsWithoutDuration": 21,
+      "trialPercentage": "22.69%",
+      "actualPercentage": "73.43%"
+    }
+  },
+  "filters": {
+    "startDate": "2025-01-01T00:00:00.000Z",
+    "endDate": "2025-11-25T23:59:59.999Z"
+  }
+}
+```
+
+**Metrics Explained:**
+
+**Login Metrics:**
+- `uniqueUsersTriedLogin`: Number of unique users who attempted to log in (success or failure)
+- `uniqueUsersSuccessfulLogin`: Number of unique users who successfully logged in at least once
+- `uniqueUsersFailedOnly`: Number of unique users who tried to log in but never succeeded
+- `totalLoginAttempts`: Total number of login attempts (all users combined)
+- `totalSuccessfulLogins`: Total number of successful logins
+- `totalFailedLogins`: Total number of failed login attempts
+- `successRate`: Percentage of successful logins out of total attempts
+
+**Transcript Metrics:**
+- `uniqueUsersGeneratedTranscripts`: Number of unique users who successfully generated at least one transcript
+- `totalTranscripts`: Total number of successfully generated transcripts
+- `trialTranscripts`: Number of transcripts with duration < 5 minutes (300,000 ms)
+- `actualTranscripts`: Number of transcripts with duration >= 5 minutes (300,000 ms)
+- `transcriptsWithoutDuration`: Number of transcripts where duration information is not available
+- `trialPercentage`: Percentage of trial transcripts
+- `actualPercentage`: Percentage of actual transcripts
+
+---
+
+### 4. Get User Activity Summary (Admin Only)
 
 **Endpoint:** `GET /api/activity-logs/user/:userId`
 
@@ -316,7 +414,7 @@ const userActivity = await fetchUserActivity('user123', 30);
 
 ---
 
-### 4. Get Available Action Types (Admin Only)
+### 5. Get Available Action Types (Admin Only)
 
 **Endpoint:** `GET /api/activity-logs/action-types`
 
@@ -364,7 +462,7 @@ const actionTypes = await fetchActionTypes();
 
 ---
 
-### 5. Get My Activity (Any Authenticated User)
+### 6. Get My Activity (Any Authenticated User)
 
 **Endpoint:** `GET /api/activity-logs/my-activity`
 
@@ -730,7 +828,548 @@ function ActivityStatistics() {
 export default ActivityStatistics;
 ```
 
-### Example 3: User Activity Modal
+### Example 3: Advanced Statistics Dashboard
+
+```jsx
+import React, { useState, useEffect } from 'react';
+
+function AdvancedStatisticsDashboard() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [dateRange, setDateRange] = useState({
+    startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+    endDate: new Date().toISOString()
+  });
+
+  useEffect(() => {
+    setLoading(true);
+    fetchAdvancedStatistics(dateRange)
+      .then(data => {
+        setStats(data.data);
+      })
+      .finally(() => setLoading(false));
+  }, [dateRange]);
+
+  const handleDateRangeChange = (range) => {
+    const now = new Date();
+    let startDate;
+    
+    switch(range) {
+      case '7days':
+        startDate = new Date(now - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case '30days':
+        startDate = new Date(now - 30 * 24 * 60 * 60 * 1000);
+        break;
+      case '90days':
+        startDate = new Date(now - 90 * 24 * 60 * 60 * 1000);
+        break;
+      case 'year':
+        startDate = new Date(now - 365 * 24 * 60 * 60 * 1000);
+        break;
+      default:
+        startDate = new Date(now - 30 * 24 * 60 * 60 * 1000);
+    }
+    
+    setDateRange({
+      startDate: startDate.toISOString(),
+      endDate: now.toISOString()
+    });
+  };
+
+  if (loading) return <div className="loading-spinner">Loading statistics...</div>;
+  if (!stats) return null;
+
+  return (
+    <div className="advanced-stats-dashboard">
+      <div className="dashboard-header">
+        <h1>📊 Advanced Analytics Dashboard</h1>
+        
+        <div className="date-range-buttons">
+          <button onClick={() => handleDateRangeChange('7days')}>Last 7 Days</button>
+          <button onClick={() => handleDateRangeChange('30days')}>Last 30 Days</button>
+          <button onClick={() => handleDateRangeChange('90days')}>Last 90 Days</button>
+          <button onClick={() => handleDateRangeChange('year')}>Last Year</button>
+        </div>
+
+        <div className="custom-date-range">
+          <input 
+            type="date" 
+            value={dateRange.startDate.split('T')[0]}
+            onChange={(e) => setDateRange(prev => ({
+              ...prev,
+              startDate: new Date(e.target.value).toISOString()
+            }))}
+          />
+          <span>to</span>
+          <input 
+            type="date" 
+            value={dateRange.endDate.split('T')[0]}
+            onChange={(e) => setDateRange(prev => ({
+              ...prev,
+              endDate: new Date(e.target.value).toISOString()
+            }))}
+          />
+        </div>
+      </div>
+
+      {/* Login Metrics Section */}
+      <section className="metrics-section">
+        <h2>🔐 Login Metrics</h2>
+        
+        <div className="metrics-grid">
+          <div className="metric-card primary">
+            <div className="metric-icon">👥</div>
+            <div className="metric-content">
+              <h3>Unique Users Tried Login</h3>
+              <p className="metric-value">{stats.loginMetrics.uniqueUsersTriedLogin}</p>
+              <p className="metric-label">Total users who attempted login</p>
+            </div>
+          </div>
+
+          <div className="metric-card success">
+            <div className="metric-icon">✅</div>
+            <div className="metric-content">
+              <h3>Successful Logins</h3>
+              <p className="metric-value">{stats.loginMetrics.uniqueUsersSuccessfulLogin}</p>
+              <p className="metric-label">Users who logged in successfully</p>
+            </div>
+          </div>
+
+          <div className="metric-card danger">
+            <div className="metric-icon">❌</div>
+            <div className="metric-content">
+              <h3>Failed Only</h3>
+              <p className="metric-value">{stats.loginMetrics.uniqueUsersFailedOnly}</p>
+              <p className="metric-label">Users who never succeeded</p>
+            </div>
+          </div>
+
+          <div className="metric-card info">
+            <div className="metric-icon">📈</div>
+            <div className="metric-content">
+              <h3>Success Rate</h3>
+              <p className="metric-value">{stats.loginMetrics.successRate}</p>
+              <p className="metric-label">Overall login success rate</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="detailed-stats">
+          <div className="stat-row">
+            <span className="stat-label">Total Login Attempts:</span>
+            <span className="stat-value">{stats.loginMetrics.totalLoginAttempts}</span>
+          </div>
+          <div className="stat-row">
+            <span className="stat-label">Successful Logins:</span>
+            <span className="stat-value success">{stats.loginMetrics.totalSuccessfulLogins}</span>
+          </div>
+          <div className="stat-row">
+            <span className="stat-label">Failed Logins:</span>
+            <span className="stat-value danger">{stats.loginMetrics.totalFailedLogins}</span>
+          </div>
+        </div>
+      </section>
+
+      {/* Transcript Metrics Section */}
+      <section className="metrics-section">
+        <h2>📝 Transcript Metrics</h2>
+        
+        <div className="metrics-grid">
+          <div className="metric-card primary">
+            <div className="metric-icon">👤</div>
+            <div className="metric-content">
+              <h3>Users Generated Transcripts</h3>
+              <p className="metric-value">{stats.transcriptMetrics.uniqueUsersGeneratedTranscripts}</p>
+              <p className="metric-label">Unique users who created transcripts</p>
+            </div>
+          </div>
+
+          <div className="metric-card info">
+            <div className="metric-icon">📄</div>
+            <div className="metric-content">
+              <h3>Total Transcripts</h3>
+              <p className="metric-value">{stats.transcriptMetrics.totalTranscripts}</p>
+              <p className="metric-label">All generated transcripts</p>
+            </div>
+          </div>
+
+          <div className="metric-card warning">
+            <div className="metric-icon">⏱️</div>
+            <div className="metric-content">
+              <h3>Trial Transcripts</h3>
+              <p className="metric-value">{stats.transcriptMetrics.trialTranscripts}</p>
+              <p className="metric-label">Duration {'<'} 5 minutes ({stats.transcriptMetrics.trialPercentage})</p>
+            </div>
+          </div>
+
+          <div className="metric-card success">
+            <div className="metric-icon">⏰</div>
+            <div className="metric-content">
+              <h3>Actual Transcripts</h3>
+              <p className="metric-value">{stats.transcriptMetrics.actualTranscripts}</p>
+              <p className="metric-label">Duration {'≥'} 5 minutes ({stats.transcriptMetrics.actualPercentage})</p>
+            </div>
+          </div>
+        </div>
+
+        {stats.transcriptMetrics.transcriptsWithoutDuration > 0 && (
+          <div className="info-banner">
+            <span>ℹ️</span>
+            <p>
+              {stats.transcriptMetrics.transcriptsWithoutDuration} transcript(s) don't have duration information
+            </p>
+          </div>
+        )}
+
+        {/* Transcript Distribution Chart */}
+        <div className="chart-container">
+          <h3>Transcript Distribution</h3>
+          <div className="progress-bar-chart">
+            <div className="progress-bar">
+              <div 
+                className="progress-segment trial"
+                style={{ 
+                  width: `${(stats.transcriptMetrics.trialTranscripts / stats.transcriptMetrics.totalTranscripts * 100)}%` 
+                }}
+                title={`Trial: ${stats.transcriptMetrics.trialTranscripts} (${stats.transcriptMetrics.trialPercentage})`}
+              >
+                <span>Trial: {stats.transcriptMetrics.trialPercentage}</span>
+              </div>
+              <div 
+                className="progress-segment actual"
+                style={{ 
+                  width: `${(stats.transcriptMetrics.actualTranscripts / stats.transcriptMetrics.totalTranscripts * 100)}%` 
+                }}
+                title={`Actual: ${stats.transcriptMetrics.actualTranscripts} (${stats.transcriptMetrics.actualPercentage})`}
+              >
+                <span>Actual: {stats.transcriptMetrics.actualPercentage}</span>
+              </div>
+            </div>
+            <div className="legend">
+              <div className="legend-item">
+                <span className="legend-color trial"></span>
+                <span>Trial ({'<'} 5 min)</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color actual"></span>
+                <span>Actual ({'≥'} 5 min)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Summary Section */}
+      <section className="summary-section">
+        <h2>📊 Summary</h2>
+        <div className="summary-grid">
+          <div className="summary-card">
+            <h4>User Engagement</h4>
+            <p>
+              {stats.loginMetrics.uniqueUsersSuccessfulLogin} users successfully logged in,
+              representing a {stats.loginMetrics.successRate} success rate.
+            </p>
+          </div>
+          <div className="summary-card">
+            <h4>Transcript Activity</h4>
+            <p>
+              {stats.transcriptMetrics.uniqueUsersGeneratedTranscripts} users generated
+              a total of {stats.transcriptMetrics.totalTranscripts} transcripts.
+            </p>
+          </div>
+          <div className="summary-card">
+            <h4>Usage Pattern</h4>
+            <p>
+              {stats.transcriptMetrics.actualPercentage} of transcripts are actual interviews
+              ({'≥'} 5 minutes), showing strong user engagement.
+            </p>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+export default AdvancedStatisticsDashboard;
+```
+
+**CSS Example for Advanced Statistics:**
+
+```css
+.advanced-stats-dashboard {
+  padding: 2rem;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  margin-bottom: 2rem;
+}
+
+.dashboard-header h1 {
+  margin-bottom: 1rem;
+}
+
+.date-range-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.date-range-buttons button {
+  padding: 0.5rem 1rem;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.date-range-buttons button:hover {
+  background: #f0f0f0;
+}
+
+.custom-date-range {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.metrics-section {
+  margin-bottom: 3rem;
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.metrics-section h2 {
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.metric-card {
+  padding: 1.5rem;
+  border-radius: 8px;
+  background: white;
+  border: 2px solid #e0e0e0;
+  display: flex;
+  gap: 1rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.metric-card.primary {
+  border-color: #3b82f6;
+  background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+  color: white;
+}
+
+.metric-card.success {
+  border-color: #10b981;
+  background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+  color: white;
+}
+
+.metric-card.danger {
+  border-color: #ef4444;
+  background: linear-gradient(135deg, #ef4444 0%, #f87171 100%);
+  color: white;
+}
+
+.metric-card.warning {
+  border-color: #f59e0b;
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+  color: white;
+}
+
+.metric-card.info {
+  border-color: #8b5cf6;
+  background: linear-gradient(135deg, #8b5cf6 0%, #a78bfa 100%);
+  color: white;
+}
+
+.metric-icon {
+  font-size: 2.5rem;
+}
+
+.metric-content h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  opacity: 0.9;
+}
+
+.metric-value {
+  font-size: 2rem;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.metric-label {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.detailed-stats {
+  background: #f9fafb;
+  border-radius: 6px;
+  padding: 1rem;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.stat-row:last-child {
+  border-bottom: none;
+}
+
+.stat-label {
+  color: #6b7280;
+}
+
+.stat-value {
+  font-weight: 600;
+  color: #111827;
+}
+
+.stat-value.success {
+  color: #10b981;
+}
+
+.stat-value.danger {
+  color: #ef4444;
+}
+
+.info-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  margin: 1rem 0;
+  color: #1e40af;
+}
+
+.progress-bar-chart {
+  margin-top: 1rem;
+}
+
+.progress-bar {
+  display: flex;
+  height: 60px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.progress-segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 600;
+  transition: all 0.3s;
+}
+
+.progress-segment:hover {
+  filter: brightness(1.1);
+}
+
+.progress-segment.trial {
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+}
+
+.progress-segment.actual {
+  background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+}
+
+.legend {
+  display: flex;
+  gap: 2rem;
+  margin-top: 1rem;
+  justify-content: center;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legend-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.legend-color.trial {
+  background: linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%);
+}
+
+.legend-color.actual {
+  background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+}
+
+.summary-section {
+  background: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.summary-card {
+  padding: 1.5rem;
+  background: #f9fafb;
+  border-radius: 6px;
+  border-left: 4px solid #3b82f6;
+}
+
+.summary-card h4 {
+  margin-bottom: 0.75rem;
+  color: #111827;
+}
+
+.summary-card p {
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.loading-spinner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 400px;
+  font-size: 1.25rem;
+  color: #6b7280;
+}
+```
+
+### Example 4: User Activity Modal
 
 ```jsx
 import React, { useState, useEffect } from 'react';
@@ -927,6 +1566,38 @@ interface UserActivityResponse {
     recentActivities: ActivityLog[];
   };
 }
+
+interface AdvancedStatisticsResponse {
+  success: boolean;
+  data: {
+    dateRange: {
+      startDate: string | null;
+      endDate: string | null;
+    };
+    loginMetrics: {
+      uniqueUsersTriedLogin: number;
+      uniqueUsersSuccessfulLogin: number;
+      uniqueUsersFailedOnly: number;
+      totalLoginAttempts: number;
+      totalSuccessfulLogins: number;
+      totalFailedLogins: number;
+      successRate: string;
+    };
+    transcriptMetrics: {
+      uniqueUsersGeneratedTranscripts: number;
+      totalTranscripts: number;
+      trialTranscripts: number;
+      actualTranscripts: number;
+      transcriptsWithoutDuration: number;
+      trialPercentage: string;
+      actualPercentage: string;
+    };
+  };
+  filters: {
+    startDate: string | null;
+    endDate: string | null;
+  };
+}
 ```
 
 ---
@@ -939,8 +1610,10 @@ interface UserActivityResponse {
 4. ✅ Implement main activity logs table with `/api/activity-logs`
 5. ✅ Add pagination controls
 6. ✅ Create statistics dashboard with `/api/activity-logs/statistics`
-7. ✅ Add user activity modal with `/api/activity-logs/user/:userId`
-8. ✅ Style success/failure indicators
+7. ✅ Create advanced statistics dashboard with `/api/activity-logs/advanced-statistics`
+8. ✅ Add user activity modal with `/api/activity-logs/user/:userId`
+9. ✅ Style success/failure indicators
+10. ✅ Implement date range filters for analytics
 
 ---
 
